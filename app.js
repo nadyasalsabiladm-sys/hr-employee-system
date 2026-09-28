@@ -3,7 +3,7 @@ let sb = null;
 let state = {
   session: null, profile: null, view: 'dashboard',
   employees: [], contracts: [], leave: [], warnings: [],
-  companies: [], branches: [], departments: [], positions: [],
+  companies: [], branches: [], workLocations: [], departments: [], positions: [],
   assignments: [], currentByEmp: {},
   attToday: [], attendance: [], attCtx: null, attCtxError: null, attGeo: null, attTab: 'history', clockTimer: null, clockOffset: 0, flow: null,
   attF: { q: '', company: '', branch: '', from: '', to: '', status: '' },
@@ -105,18 +105,19 @@ async function loadAll() {
     sb.from('warnings').select('*, employees(full_name)').order('issue_date', { ascending: false }),
     sb.from('companies').select('*').order('name'),
     sb.from('branches').select('*').order('name'),
+    sb.from('work_locations').select('*').eq('is_active', true).order('name'),
     sb.from('departments').select('*').order('name'),
     sb.from('positions').select('*').order('name'),
-    sb.from('employee_assignments').select('*, branches(name)').order('start_date', { ascending: false }),
+    sb.from('employee_assignments').select('*, branches(name), work_locations(name)').order('start_date', { ascending: false }),
     sb.from('attendance_records').select('*').eq('attendance_date', todayJakarta())
   ]);
-  const names = ['karyawan', 'kontrak', 'cuti', 'teguran', 'perusahaan', 'outlet', 'departemen', 'jabatan', 'penempatan outlet', 'absensi hari ini'];
+  const names = ['karyawan', 'kontrak', 'cuti', 'teguran', 'perusahaan', 'outlet', 'lokasi kerja', 'departemen', 'jabatan', 'penempatan', 'absensi hari ini'];
   const failed = queries.map((q, i) => q.error ? names[i] : null).filter(Boolean);
   if (failed.length) toast('Gagal memuat data: ' + failed.join(', ') + '. ' + friendlyError(queries.find(q => q.error).error), 'error');
   state.employees = queries[0].data || []; state.contracts = queries[1].data || []; state.leave = queries[2].data || []; state.warnings = queries[3].data || [];
-  state.companies = queries[4].data || []; state.branches = queries[5].data || []; state.departments = queries[6].data || []; state.positions = queries[7].data || [];
-  state.assignments = queries[8].data || [];
-  state.attToday = queries[9].data || [];
+  state.companies = queries[4].data || []; state.branches = queries[5].data || []; state.workLocations = queries[6].data || []; state.departments = queries[7].data || []; state.positions = queries[8].data || [];
+  state.assignments = queries[9].data || [];
+  state.attToday = queries[10].data || [];
   rebuildAssignmentIndex();
 }
 
@@ -448,9 +449,15 @@ function rebuildAssignmentIndex() {
 }
 function currentOutletName(empId) {
   const a = state.currentByEmp[empId];
-  return a && a.branch_id ? (a.branches?.name || state.branches.find(b => b.id === a.branch_id)?.name || '-') : '-';
+  return assignmentLocationName(a);
 }
-const assignmentOutlet = a => a.branch_id ? (a.branches?.name || state.branches.find(b => b.id === a.branch_id)?.name || '-') : 'Tidak ada outlet';
+function assignmentLocationName(a) {
+  if (!a) return '-';
+  if (a.work_location_id) return a.work_locations?.name || state.workLocations.find(w => w.id === a.work_location_id)?.name || '-';
+  if (a.branch_id) return a.branches?.name || state.branches.find(b => b.id === a.branch_id)?.name || '-';
+  return 'Tidak ada lokasi';
+}
+const assignmentOutlet = a => assignmentLocationName(a);
 function assignmentStatus(a) {
   if (a.end_date) return { label: 'Selesai', cls: 'badge-gray' };
   if (a.is_active !== false) return { label: 'Aktif', cls: 'badge-green' };
@@ -468,7 +475,7 @@ window.showEmployeeDetail = id => {
   const modal = document.createElement('div');
   modal.className = 'modal-backdrop'; modal.id = 'detailModal';
   modal.innerHTML = `<div class="modal modal-wide">
-    <div class="section-head"><h2>${esc(e.full_name)}</h2><div class="row-actions"><button type="button" class="btn btn-primary" onclick="editEmployee('${esc(id)}')">Edit Data</button><button type="button" class="btn btn-light" data-close>Tutup</button></div></div>
+    <div class="section-head"><h2>${esc(e.full_name)}</h2><button type="button" class="btn btn-light" data-close>Tutup</button></div>
     <h3 class="sub-title">Profil Karyawan</h3>
     <div class="detail-grid">
       ${item('ID Karyawan', e.employee_number)}${item('Nama Lengkap', e.full_name)}${item('NIK', e.nik)}
@@ -481,54 +488,6 @@ window.showEmployeeDetail = id => {
   </div>`;
   document.body.appendChild(modal);
   modal.querySelectorAll('[data-close]').forEach(b => b.onclick = () => modal.remove());
-};
-
-/* ---------- Edit Data Karyawan ---------- */
-window.editEmployee = empId => {
-  const e = state.employees.find(x => x.id === empId);
-  if (!e) { toast('Data karyawan tidak ditemukan.', 'error'); return; }
-  const old = $('#detailModal'); if (old) old.remove();
-  const companyId = e.company_id || '';
-  const depts = state.departments.filter(d => isActive(d) && (d.company_id === companyId || !d.company_id));
-  const poss = state.positions.filter(p => isActive(p) && (p.company_id === companyId || !p.company_id));
-  const body = `<div class="modal-grid">
-    <div class="field"><label>ID Karyawan *</label><input name="employee_number" required value="${esc(e.employee_number || '')}"></div>
-    <div class="field"><label>Nama Lengkap *</label><input name="full_name" required value="${esc(e.full_name || '')}"></div>
-    <div class="field"><label>NIK</label><input name="nik" inputmode="numeric" value="${esc(e.nik || '')}"></div>
-    <div class="field"><label>Email</label><input name="email" type="email" value="${esc(e.email || '')}"></div>
-    <div class="field"><label>No. HP</label><input name="phone" type="tel" value="${esc(e.phone || '')}"></div>
-    <div class="field"><label>Tanggal Masuk *</label><input name="join_date" type="date" required value="${esc(e.join_date || '')}"></div>
-    <div class="field"><label>Perusahaan</label><input value="${esc(e.companies?.name || '-') }" disabled><small class="muted">Penempatan/outlet diubah melalui Riwayat Penempatan.</small></div>
-    <div class="field"><label>Departemen</label><select name="department_id"><option value="">Pilih</option>${depts.map(d => `<option value="${esc(d.id)}" ${e.department_id === d.id ? 'selected' : ''}>${esc(d.name)}</option>`).join('')}</select></div>
-    <div class="field"><label>Jabatan</label><select name="position_id"><option value="">Pilih</option>${poss.map(x => `<option value="${esc(x.id)}" ${e.position_id === x.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></div>
-    <div class="field"><label>Status</label><select name="employment_status"><option value="active" ${e.employment_status === 'active' ? 'selected' : ''}>Aktif</option><option value="inactive" ${e.employment_status === 'inactive' ? 'selected' : ''}>Tidak Aktif</option></select></div>
-    <div class="field"><label>Tipe Karyawan</label><select name="employment_type"><option value="">Pilih</option>${Object.entries(EMP_TYPE).map(([k,v]) => `<option value="${k}" ${e.employment_type === k ? 'selected' : ''}>${v}</option>`).join('')}</select></div>
-  </div>`;
-  openModal('Edit Data Karyawan', body, async form => {
-    const fd = new FormData(form);
-    const employee_number = String(fd.get('employee_number') || '').trim();
-    const full_name = String(fd.get('full_name') || '').trim();
-    const join_date = String(fd.get('join_date') || '').trim();
-    if (!employee_number || !full_name || !join_date) { toast('ID Karyawan, Nama Lengkap, dan Tanggal Masuk wajib diisi.', 'error'); return false; }
-    const dup = state.employees.find(x => x.id !== e.id && String(x.employee_number || '').trim().toLowerCase() === employee_number.toLowerCase());
-    if (dup) { toast(`ID Karyawan "${employee_number}" sudah dipakai oleh ${dup.full_name}.`, 'error'); return false; }
-    const payload = {
-      employee_number, full_name,
-      nik: String(fd.get('nik') || '').trim() || null,
-      email: String(fd.get('email') || '').trim() || null,
-      phone: String(fd.get('phone') || '').trim() || null,
-      join_date,
-      department_id: fd.get('department_id') || null,
-      position_id: fd.get('position_id') || null,
-      employment_status: fd.get('employment_status') || 'active',
-      employment_type: fd.get('employment_type') || null
-    };
-    const res = await sb.from('employees').update(payload).eq('id', e.id).select();
-    if (res.error) { toast(friendlyError(res.error), 'error'); return false; }
-    if (!res.data || !res.data.length) { toast(PERMISSION_MSG, 'error'); return false; }
-    toast(`Data karyawan "${full_name}" berhasil diperbarui.`);
-    return true;
-  }, 'Simpan Perubahan');
 };
 
 // Cek tabrakan tanggal. Rentang [mulai, selesai) ; selesai kosong = masih berjalan. Bersentuhan (selesai = mulai berikutnya) diperbolehkan.
@@ -549,13 +508,19 @@ window.assignmentForm = (empId, assignId) => {
   if (!emp) return;
   const rec = assignId ? state.assignments.find(a => a.id === assignId) : null;
   const branches = state.branches.filter(b => b.company_id === emp.company_id && (isActive(b) || b.id === rec?.branch_id));
-  const hasOutlets = state.branches.some(b => b.company_id === emp.company_id && isActive(b)) || branches.length > 0;
+  const locations = state.workLocations.filter(w => w.company_id === emp.company_id && (isActive(w) || w.id === rec?.work_location_id));
+  const hasOutlets = branches.length > 0;
+  const hasLocations = locations.length > 0;
+  const isZaycoStyle = !hasOutlets && hasLocations;
   const outletField = hasOutlets
     ? `<select name="branch_id" required><option value="">Pilih outlet</option>${branches.map(b => `<option value="${esc(b.id)}" ${rec?.branch_id === b.id ? 'selected' : ''}>${esc(b.name)}${isActive(b) ? '' : ' (nonaktif)'}</option>`).join('')}</select>`
-    : `<select name="branch_id" disabled><option value="">Tidak memiliki outlet</option></select>`;
+    : isZaycoStyle
+      ? `<select name="work_location_id" required><option value="">Pilih lokasi kerja</option>${locations.map(w => `<option value="${esc(w.id)}" ${rec?.work_location_id === w.id ? 'selected' : ''}>${esc(w.name)}${isActive(w) ? '' : ' (nonaktif)'}</option>`).join('')}</select>`
+      : `<input value="Belum ada lokasi kerja" disabled><input type="hidden" name="work_location_id" value="">`;
+  const locationLabel = hasOutlets ? 'Outlet' : 'Lokasi Kerja';
   const body = `<div class="modal-grid">
     <div class="field"><label>Karyawan</label><input value="${esc(emp.full_name)} — ${esc(emp.companies?.name || '')}" disabled></div>
-    <div class="field"><label>Outlet${hasOutlets ? ' *' : ''}</label>${outletField}</div>
+    <div class="field"><label>${locationLabel}${(hasOutlets || isZaycoStyle) ? ' *' : ''}</label>${outletField}</div>
     <div class="field"><label>Tanggal Mulai *</label><input name="start_date" type="date" required value="${esc(rec?.start_date || '')}"></div>
     <div class="field"><label>Tanggal Selesai</label><input name="end_date" type="date" value="${esc(rec?.end_date || '')}"></div>
     <div class="field" style="grid-column:1/-1"><label>Catatan</label><textarea name="notes" rows="2">${esc(rec?.notes || '')}</textarea></div>
@@ -565,17 +530,20 @@ window.assignmentForm = (empId, assignId) => {
     const start_date = fd.get('start_date') || '';
     const end_date = fd.get('end_date') || null;
     const notes = String(fd.get('notes') || '').trim() || null;
-    const branch_id = hasOutlets ? (fd.get('branch_id') || null) : null;   // perusahaan tanpa outlet (Zayco) => selalu NULL
+    const branch_id = hasOutlets ? (fd.get('branch_id') || null) : null;
+    const work_location_id = hasOutlets ? null : (fd.get('work_location_id') || null);
     if (hasOutlets && !branch_id) { toast('Pilih outlet terlebih dahulu.', 'error'); return false; }
+    if (!hasOutlets && isZaycoStyle && !work_location_id) { toast('Pilih lokasi kerja terlebih dahulu.', 'error'); return false; }
     if (!start_date) { toast('Tanggal mulai wajib diisi.', 'error'); return false; }
     if (end_date && end_date < start_date) { toast('Tanggal selesai tidak boleh lebih kecil dari tanggal mulai.', 'error'); return false; }
     const now = new Date().toISOString();
+    const payload = { branch_id, work_location_id, start_date, end_date, notes, is_active: !end_date, updated_at: now };
 
     /* --- EDIT --- */
     if (rec) {
       const err = assignmentConflict(empId, { id: rec.id, start_date, end_date });
       if (err) { toast(err, 'error'); return false; }
-      const res = await sb.from('employee_assignments').update({ branch_id, start_date, end_date, notes, is_active: !end_date, updated_at: now }).eq('id', rec.id).select();
+      const res = await sb.from('employee_assignments').update(payload).eq('id', rec.id).select();
       if (res.error) { toast(friendlyError(res.error), 'error'); return false; }
       if (!res.data || !res.data.length) { toast(PERMISSION_MSG, 'error'); return false; }
       toast('Penempatan berhasil diperbarui.');
@@ -584,7 +552,7 @@ window.assignmentForm = (empId, assignId) => {
 
     /* --- TAMBAH --- */
     const act = state.currentByEmp[empId];
-    const replacing = !!act && !end_date;      // penempatan baru yang aktif menggantikan yang lama
+    const replacing = !!act && !end_date;
     if (replacing) {
       if (start_date < act.start_date) {
         toast(`Tanggal mulai tidak boleh sebelum penempatan aktif terakhir (${assignmentOutlet(act)}, mulai ${fmtDate(act.start_date)}).`, 'error');
@@ -592,13 +560,11 @@ window.assignmentForm = (empId, assignId) => {
       }
       const err = assignmentConflict(empId, { start_date, end_date }, [act.id]);
       if (err) { toast(err, 'error'); return false; }
-      if (!confirm(`Karyawan ini masih memiliki penempatan aktif di ${act.branch_id ? assignmentOutlet(act) : 'tanpa outlet'}.\nApakah penempatan lama akan diakhiri dan diganti dengan penempatan baru?`)) return false;
-      // 1) akhiri penempatan lama (riwayat tidak dihapus)
+      if (!confirm(`Karyawan ini masih memiliki penempatan aktif di ${assignmentOutlet(act)}.\nApakah penempatan lama akan diakhiri dan diganti dengan penempatan baru?`)) return false;
       const closed = await sb.from('employee_assignments').update({ end_date: start_date, is_active: false, updated_at: now }).eq('id', act.id).select();
       if (closed.error) { toast(friendlyError(closed.error), 'error'); return false; }
       if (!closed.data || !closed.data.length) { toast(PERMISSION_MSG, 'error'); return false; }
-      // 2) buat penempatan baru; jika gagal, kembalikan penempatan lama
-      const ins = await sb.from('employee_assignments').insert({ employee_id: empId, branch_id, start_date, end_date: null, is_active: true, notes }).select();
+      const ins = await sb.from('employee_assignments').insert({ employee_id: empId, branch_id, work_location_id, start_date, end_date: null, is_active: true, notes }).select();
       if (ins.error || !ins.data || !ins.data.length) {
         await sb.from('employee_assignments').update({ end_date: act.end_date || null, is_active: true, updated_at: new Date().toISOString() }).eq('id', act.id);
         toast('Mutasi dibatalkan, penempatan lama dikembalikan. ' + (ins.error ? friendlyError(ins.error) : PERMISSION_MSG), 'error');
@@ -610,7 +576,7 @@ window.assignmentForm = (empId, assignId) => {
 
     const err = assignmentConflict(empId, { start_date, end_date });
     if (err) { toast(err, 'error'); return false; }
-    const res = await sb.from('employee_assignments').insert({ employee_id: empId, branch_id, start_date, end_date, notes, is_active: !end_date }).select();
+    const res = await sb.from('employee_assignments').insert({ employee_id: empId, branch_id, work_location_id, start_date, end_date, notes, is_active: !end_date }).select();
     if (res.error) { toast(friendlyError(res.error), 'error'); return false; }
     if (!res.data || !res.data.length) { toast(PERMISSION_MSG, 'error'); return false; }
     toast('Penempatan berhasil ditambahkan.');
