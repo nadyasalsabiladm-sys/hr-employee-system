@@ -1861,7 +1861,8 @@ function cgCollectFormData(form) {
     gender: String(fd.get('cg_gender') || '').trim(),
     previousContractNumber: String(fd.get('cg_previous_contract_number') || '').trim(),
     previousStartDate: fd.get('cg_previous_start_date') || '',
-    previousEndDate: fd.get('cg_previous_end_date') || ''
+    previousEndDate: fd.get('cg_previous_end_date') || '',
+    amendmentLabel: String(fd.get('cg_number') || '').trim().split(' - ')[0] || 'AMANDemen I'
   };
 }
 
@@ -2193,7 +2194,7 @@ function cgAmendmentHtml(d) {
 
   return `
     <div class="cg-doc">
-      <h1>AMANDemen I</h1>
+      <h1>${cgEsc(d.amendmentLabel || 'AMANDemen I')}</h1>
       <h1 style="font-size:14pt;margin-top:-8px;">PERJANJIAN KERJA WAKTU TERETENTU</h1>
       <p class="center">Nomor: ${cgEsc(d.number || '[NOMOR DOKUMEN]')}</p>
 
@@ -2266,6 +2267,84 @@ function cgPrintCss() {
     </style>`;
 }
 
+function cgCompanyDocCode(emp) {
+  const name = cgCompanyName(emp);
+  return /zayco/i.test(name) ? 'CV.ZBA' : (/my cake/i.test(name) ? 'IMC' : String(name || 'HO').replace(/[^A-Z0-9]+/gi, '').slice(0, 8).toUpperCase() || 'HO');
+}
+
+function cgNextRoman(n) {
+  const vals = [[1000,'M'],[900,'CM'],[500,'D'],[400,'CD'],[100,'C'],[90,'XC'],[50,'L'],[40,'XL'],[10,'X'],[9,'IX'],[5,'V'],[4,'IV'],[1,'I']];
+  let out = '';
+  for (const [v,s] of vals) { while (n >= v) { out += s; n -= v; } }
+  return out || 'I';
+}
+
+function cgNextContractNumber(emp, type, year = new Date().getFullYear()) {
+  const prefix = ({ pkwt: 'PKWT', pkwtt: 'PKWTT', offering_letter: 'OL' }[type] || 'DOC');
+  const code = cgCompanyDocCode(emp);
+  const re = new RegExp('^(\\d+)\\/' + prefix + '-HO\\/.*' + code.replace('.', '\\.') + '\\/' + year + '$', 'i');
+  let max = 0;
+  for (const c of (state.contracts || [])) {
+    const num = String(c?.contract_number || '').trim();
+    const m = num.match(re);
+    if (m) max = Math.max(max, Number(m[1]) || 0);
+  }
+  return String(max + 1).padStart(3, '0') + '/' + prefix + '-HO/' + code + '/' + year;
+}
+
+function cgLatestPkwt(empId) {
+  return (state.contracts || [])
+    .filter(c => c.employee_id === empId && String(c.contract_type || '').toLowerCase() === 'pkwt')
+    .sort((a,b) => String(b.start_date || b.created_at || '').localeCompare(String(a.start_date || a.created_at || '')))[0] || null;
+}
+
+function cgNextAmendmentLabel(empId) {
+  const count = (state.contracts || []).filter(c => c.employee_id === empId && String(c.contract_type || '').toLowerCase() === 'amendment').length;
+  return 'AMENDMENT ' + cgNextRoman(count + 1);
+}
+
+function cgAutoNumber(emp, type) {
+  if (!emp || !type) return '';
+  if (type === 'amendment') {
+    const prev = cgLatestPkwt(emp.id);
+    return prev?.contract_number ? cgNextAmendmentLabel(emp.id) + ' - ' + prev.contract_number : cgNextAmendmentLabel(emp.id);
+  }
+  return cgNextContractNumber(emp, type);
+}
+
+function cgApplyAutoContractFields(modal) {
+  const employeeSelect = modal.querySelector('[name="cg_employee_id"]');
+  const typeSelect = modal.querySelector('[name="cg_type"]');
+  const numberInput = modal.querySelector('[name="cg_number"]');
+  const prevNumber = modal.querySelector('[name="cg_previous_contract_number"]');
+  const prevStart = modal.querySelector('[name="cg_previous_start_date"]');
+  const prevEnd = modal.querySelector('[name="cg_previous_end_date"]');
+  const emp = state.employees.find(e => e.id === employeeSelect?.value);
+  const type = typeSelect?.value;
+  if (!emp || !type) return;
+
+  if (numberInput) numberInput.value = cgAutoNumber(emp, type);
+  const amendment = type === 'amendment';
+  [prevNumber, prevStart, prevEnd].forEach(el => { if (el) el.readOnly = amendment; });
+
+  if (amendment) {
+    const prev = cgLatestPkwt(emp.id);
+    if (prev) {
+      if (prevNumber) prevNumber.value = prev.contract_number || '';
+      if (prevStart) prevStart.value = prev.start_date || '';
+      if (prevEnd) prevEnd.value = prev.end_date || '';
+    } else {
+      if (prevNumber) prevNumber.value = '';
+      if (prevStart) prevStart.value = '';
+      if (prevEnd) prevEnd.value = '';
+    }
+  } else {
+    if (prevNumber) prevNumber.value = '';
+    if (prevStart) prevStart.value = '';
+    if (prevEnd) prevEnd.value = '';
+  }
+}
+
 function cgOpenGenerator() {
   const body = `
     <div class="info-box">
@@ -2292,7 +2371,14 @@ function cgOpenGenerator() {
         </select>
       </div>
 
-      ${cgField('cg_number', 'No. Dokumen / Kontrak')}
+      <div class="field">
+        <label>No. Dokumen / Kontrak</label>
+        <div class="row-actions">
+          <input name="cg_number" readonly>
+          <button type="button" class="btn btn-light btn-sm" onclick="cgApplyAutoContractFields(this.closest('.modal'))">↻ Generate</button>
+        </div>
+        <small>Nomor dibuat otomatis berdasarkan perusahaan, jenis dokumen, dan tahun.</small>
+      </div>
       ${cgField('cg_previous_contract_number', 'No. Kontrak Sebelumnya')}
       ${cgDateField('cg_previous_start_date', 'Periode Sebelumnya — Mulai')}
       ${cgDateField('cg_previous_end_date', 'Periode Sebelumnya — Berakhir')}
@@ -2387,9 +2473,12 @@ function cgOpenGenerator() {
 
     if (e.join_date)
       modal.querySelector('[name="cg_join_date"]').value = e.join_date;
+
+    cgApplyAutoContractFields(modal);
   };
 
   modal.querySelector('[name="cg_employee_id"]').onchange = refresh;
+  modal.querySelector('[name="cg_type"]').onchange = refresh;
   refresh();
   return modal;
 }
