@@ -97,7 +97,7 @@ async function loadProfile() {
   renderApp();
 }
 
-async function loadAll() {
+async function loadAllBase() {
   const queries = await Promise.all([
     sb.from('employees').select('*, companies(name), branches(name), departments(name), positions(name)').order('full_name'),
     sb.from('contracts').select('*').order('end_date', { ascending: true }),
@@ -2488,7 +2488,7 @@ state.leaveDays = state.leaveDays || [];
 state.leaveF = state.leaveF || { q:'', type:'', status:'', from:'', to:'' };
 
 /* ---------- Phase 6 data loader ---------- */
-const phase6OriginalLoadAll = loadAll;
+const phase6OriginalLoadAll = loadAllBase;
 async function loadAll() {
   await phase6OriginalLoadAll();
   const qs = await Promise.all([
