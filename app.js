@@ -468,7 +468,7 @@ window.showEmployeeDetail = id => {
   const modal = document.createElement('div');
   modal.className = 'modal-backdrop'; modal.id = 'detailModal';
   modal.innerHTML = `<div class="modal modal-wide">
-    <div class="section-head"><h2>${esc(e.full_name)}</h2><button type="button" class="btn btn-light" data-close>Tutup</button></div>
+    <div class="section-head"><h2>${esc(e.full_name)}</h2><div class="row-actions"><button type="button" class="btn btn-primary" onclick="editEmployee('${esc(id)}')">Edit Data</button><button type="button" class="btn btn-light" data-close>Tutup</button></div></div>
     <h3 class="sub-title">Profil Karyawan</h3>
     <div class="detail-grid">
       ${item('ID Karyawan', e.employee_number)}${item('Nama Lengkap', e.full_name)}${item('NIK', e.nik)}
@@ -481,6 +481,54 @@ window.showEmployeeDetail = id => {
   </div>`;
   document.body.appendChild(modal);
   modal.querySelectorAll('[data-close]').forEach(b => b.onclick = () => modal.remove());
+};
+
+/* ---------- Edit Data Karyawan ---------- */
+window.editEmployee = empId => {
+  const e = state.employees.find(x => x.id === empId);
+  if (!e) { toast('Data karyawan tidak ditemukan.', 'error'); return; }
+  const old = $('#detailModal'); if (old) old.remove();
+  const companyId = e.company_id || '';
+  const depts = state.departments.filter(d => isActive(d) && (d.company_id === companyId || !d.company_id));
+  const poss = state.positions.filter(p => isActive(p) && (p.company_id === companyId || !p.company_id));
+  const body = `<div class="modal-grid">
+    <div class="field"><label>ID Karyawan *</label><input name="employee_number" required value="${esc(e.employee_number || '')}"></div>
+    <div class="field"><label>Nama Lengkap *</label><input name="full_name" required value="${esc(e.full_name || '')}"></div>
+    <div class="field"><label>NIK</label><input name="nik" inputmode="numeric" value="${esc(e.nik || '')}"></div>
+    <div class="field"><label>Email</label><input name="email" type="email" value="${esc(e.email || '')}"></div>
+    <div class="field"><label>No. HP</label><input name="phone" type="tel" value="${esc(e.phone || '')}"></div>
+    <div class="field"><label>Tanggal Masuk *</label><input name="join_date" type="date" required value="${esc(e.join_date || '')}"></div>
+    <div class="field"><label>Perusahaan</label><input value="${esc(e.companies?.name || '-') }" disabled><small class="muted">Penempatan/outlet diubah melalui Riwayat Penempatan.</small></div>
+    <div class="field"><label>Departemen</label><select name="department_id"><option value="">Pilih</option>${depts.map(d => `<option value="${esc(d.id)}" ${e.department_id === d.id ? 'selected' : ''}>${esc(d.name)}</option>`).join('')}</select></div>
+    <div class="field"><label>Jabatan</label><select name="position_id"><option value="">Pilih</option>${poss.map(x => `<option value="${esc(x.id)}" ${e.position_id === x.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></div>
+    <div class="field"><label>Status</label><select name="employment_status"><option value="active" ${e.employment_status === 'active' ? 'selected' : ''}>Aktif</option><option value="inactive" ${e.employment_status === 'inactive' ? 'selected' : ''}>Tidak Aktif</option></select></div>
+    <div class="field"><label>Tipe Karyawan</label><select name="employment_type"><option value="">Pilih</option>${Object.entries(EMP_TYPE).map(([k,v]) => `<option value="${k}" ${e.employment_type === k ? 'selected' : ''}>${v}</option>`).join('')}</select></div>
+  </div>`;
+  openModal('Edit Data Karyawan', body, async form => {
+    const fd = new FormData(form);
+    const employee_number = String(fd.get('employee_number') || '').trim();
+    const full_name = String(fd.get('full_name') || '').trim();
+    const join_date = String(fd.get('join_date') || '').trim();
+    if (!employee_number || !full_name || !join_date) { toast('ID Karyawan, Nama Lengkap, dan Tanggal Masuk wajib diisi.', 'error'); return false; }
+    const dup = state.employees.find(x => x.id !== e.id && String(x.employee_number || '').trim().toLowerCase() === employee_number.toLowerCase());
+    if (dup) { toast(`ID Karyawan "${employee_number}" sudah dipakai oleh ${dup.full_name}.`, 'error'); return false; }
+    const payload = {
+      employee_number, full_name,
+      nik: String(fd.get('nik') || '').trim() || null,
+      email: String(fd.get('email') || '').trim() || null,
+      phone: String(fd.get('phone') || '').trim() || null,
+      join_date,
+      department_id: fd.get('department_id') || null,
+      position_id: fd.get('position_id') || null,
+      employment_status: fd.get('employment_status') || 'active',
+      employment_type: fd.get('employment_type') || null
+    };
+    const res = await sb.from('employees').update(payload).eq('id', e.id).select();
+    if (res.error) { toast(friendlyError(res.error), 'error'); return false; }
+    if (!res.data || !res.data.length) { toast(PERMISSION_MSG, 'error'); return false; }
+    toast(`Data karyawan "${full_name}" berhasil diperbarui.`);
+    return true;
+  }, 'Simpan Perubahan');
 };
 
 // Cek tabrakan tanggal. Rentang [mulai, selesai) ; selesai kosong = masih berjalan. Bersentuhan (selesai = mulai berikutnya) diperbolehkan.
@@ -926,179 +974,5 @@ window.attDetail = id => {
     im.onload = () => { el.textContent = ''; el.appendChild(im); };
   });
 };
-
-
-/* =====================================================================
-   PHASE 3B — GPS MONITORING KHUSUS KARYAWAN TERTENTU
-   - Hanya karyawan yang diaktifkan HR yang dimonitor.
-   - Checkpoint diambil berkala saat karyawan sedang absen masuk.
-   - Website tidak dapat menjamin GPS background ketika browser ditutup/dibekukan.
-   ===================================================================== */
-const GPSM = {
-  timer: null,
-  busy: false,
-  context: null,
-  lastContextAt: 0,
-  employeeId: null
-};
-
-async function gpsmLoadContext() {
-  if (!sb || !state.session) return null;
-  const { data, error } = await sb.rpc('attendance_monitoring_context');
-  if (error) return null;
-  GPSM.context = data;
-  GPSM.lastContextAt = Date.now();
-  GPSM.employeeId = data?.employee_id || null;
-  return data;
-}
-
-async function gpsmCheckpoint(force = false) {
-  if (GPSM.busy || !state.session) return;
-  const c = GPSM.context || await gpsmLoadContext();
-  if (!c?.linked || !c.enabled || !c.attendance_active) return;
-  if (!navigator.geolocation) return;
-
-  const last = c.last_checkpoint_at ? new Date(c.last_checkpoint_at).getTime() : 0;
-  const interval = Math.max(15, Number(c.interval_minutes || 60)) * 60000;
-  if (!force && last && Date.now() < last + interval - 15000) return;
-
-  GPSM.busy = true;
-  navigator.geolocation.getCurrentPosition(async pos => {
-    try {
-      const { error } = await sb.rpc('submit_location_checkpoint', {
-        p_latitude: pos.coords.latitude,
-        p_longitude: pos.coords.longitude,
-        p_accuracy: pos.coords.accuracy
-      });
-      if (!error) await gpsmLoadContext();
-    } finally {
-      GPSM.busy = false;
-    }
-  }, () => { GPSM.busy = false; }, {
-    enableHighAccuracy: true,
-    timeout: 20000,
-    maximumAge: 0
-  });
-}
-
-function gpsmStart() {
-  if (GPSM.timer) return;
-  gpsmLoadContext().then(c => {
-    if (c?.enabled) gpsmCheckpoint(false);
-  });
-  GPSM.timer = setInterval(async () => {
-    const c = await gpsmLoadContext();
-    if (c?.enabled && c?.attendance_active) gpsmCheckpoint(false);
-  }, 60000);
-}
-
-function gpsmStop() {
-  if (GPSM.timer) clearInterval(GPSM.timer);
-  GPSM.timer = null;
-  GPSM.context = null;
-}
-
-async function gpsmSave(employeeId, enabled, intervalMinutes) {
-  const { error } = await sb.from('employee_attendance_monitoring').upsert({
-    employee_id: employeeId,
-    enabled: !!enabled,
-    interval_minutes: Number(intervalMinutes || 60),
-    updated_at: new Date().toISOString()
-  }, { onConflict: 'employee_id' });
-  if (error) { toast(friendlyError(error), 'error'); return false; }
-  toast(enabled ? `Monitoring GPS diaktifkan (${intervalMinutes} menit).` : 'Monitoring GPS dinonaktifkan.');
-  return true;
-}
-
-async function gpsmEmployeeSetting(employeeId) {
-  const { data, error } = await sb.from('employee_attendance_monitoring')
-    .select('*').eq('employee_id', employeeId).maybeSingle();
-  if (error) return null;
-  return data || { employee_id: employeeId, enabled: false, interval_minutes: 60 };
-}
-
-function gpsmAttachEmployeeBox(modal) {
-  if (!modal || modal.querySelector('#gpsMonitoringBox')) return;
-  const title = modal.querySelector('.section-head h2');
-  const emp = state.employees.find(x => x.full_name === title?.textContent);
-  if (!emp) return;
-
-  const host = modal.querySelector('.modal');
-  if (!host) return;
-  const box = document.createElement('div');
-  box.id = 'gpsMonitoringBox';
-  box.style.cssText = 'margin-top:22px;padding:16px;border:1px solid var(--border,#ddd);border-radius:12px;background:var(--surface,#fff)';
-  box.innerHTML = `<div class="section-head" style="margin:0 0 10px"><h3 class="sub-title" style="margin:0">Monitoring GPS</h3><span id="gpsmBadge" class="badge badge-gray">Memuat...</span></div>
-    <div class="muted" style="margin-bottom:12px">Khusus karyawan tertentu. Lokasi dicek berkala selama absensi aktif; bukan pelacakan GPS terus-menerus.</div>
-    <div class="modal-grid">
-      <div class="field"><label><input type="checkbox" id="gpsmEnabled"> Aktifkan monitoring GPS</label></div>
-      <div class="field"><label>Interval checkpoint</label><select id="gpsmInterval"><option value="15">Setiap 15 menit</option><option value="30">Setiap 30 menit</option><option value="60">Setiap 60 menit</option><option value="120">Setiap 120 menit</option></select></div>
-    </div>
-    <button type="button" class="btn btn-primary" id="gpsmSave">Simpan Pengaturan GPS</button>`;
-  host.appendChild(box);
-
-  (async () => {
-    const cfgm = await gpsmEmployeeSetting(emp.id);
-    if (!box.isConnected) return;
-    $('#gpsmEnabled').checked = !!cfgm?.enabled;
-    $('#gpsmInterval').value = String(cfgm?.interval_minutes || 60);
-    const badge = $('#gpsmBadge');
-    badge.textContent = cfgm?.enabled ? 'Aktif' : 'Tidak aktif';
-    badge.className = 'badge ' + (cfgm?.enabled ? 'badge-green' : 'badge-gray');
-    $('#gpsmSave').onclick = async () => {
-      const btn = $('#gpsmSave'); btn.disabled = true;
-      const ok = await gpsmSave(emp.id, $('#gpsmEnabled').checked, $('#gpsmInterval').value);
-      btn.disabled = false;
-      if (ok) {
-        badge.textContent = $('#gpsmEnabled').checked ? 'Aktif' : 'Tidak aktif';
-        badge.className = 'badge ' + ($('#gpsmEnabled').checked ? 'badge-green' : 'badge-gray');
-      }
-    };
-  })();
-}
-
-const GPSM_detailObserver = new MutationObserver(() => {
-  const modal = document.querySelector('#detailModal');
-  if (modal) gpsmAttachEmployeeBox(modal);
-});
-GPSM_detailObserver.observe(document.body, { childList: true, subtree: true });
-
-const GPSM_origRenderAttHistory = renderAttHistory;
-renderAttHistory = function() {
-  GPSM_origRenderAttHistory();
-  const box = $('#attHistory');
-  if (!box || !state.profile) return;
-  const existing = $('#gpsmAdminPanel');
-  if (existing) existing.remove();
-  const panel = document.createElement('div');
-  panel.id = 'gpsmAdminPanel';
-  panel.className = 'section';
-  panel.innerHTML = `<div class="section-head"><h2>Monitoring GPS</h2><button class="btn btn-light btn-sm" id="gpsmRefresh">Refresh</button></div><div class="card empty">Memuat checkpoint GPS...</div>`;
-  box.parentNode.appendChild(panel);
-  const load = async () => {
-    const from = state.attF.from || todayJakarta(), to = state.attF.to || todayJakarta();
-    const { data, error } = await sb.from('attendance_location_checkpoints')
-      .select('*, employees(full_name, employee_number, company_id)')
-      .gte('attendance_date', from).lte('attendance_date', to)
-      .order('captured_at', { ascending: false }).limit(1000);
-    const host = panel.querySelector('.card');
-    if (error) { host.className = 'card error'; host.textContent = friendlyError(error); return; }
-    const rows = data || [];
-    if (!rows.length) { host.className = 'card empty'; host.textContent = 'Belum ada checkpoint GPS.'; return; }
-    host.className = 'table-wrap';
-    host.innerHTML = `<table class="table"><thead><tr><th>Waktu</th><th>Karyawan</th><th>Lokasi</th><th>Akurasi</th><th>Jarak</th><th>Status</th></tr></thead><tbody>${rows.map(r => `<tr><td>${esc(fmtDateTime(r.captured_at,'Asia/Jakarta'))}</td><td><b>${esc(r.employees?.full_name || '-')}</b><div class="muted">${esc(r.employees?.employee_number || '')}</div></td><td>${esc(attLocation(r))}</td><td>${Math.round(Number(r.accuracy_meter || 0))} m</td><td>${r.distance_meter == null ? '-' : Math.round(Number(r.distance_meter)) + ' m'}</td><td>${r.inside_area ? '<span class="badge badge-green">Di area</span>' : '<span class="badge badge-red">Di luar area</span>'}</td></tr>`).join('')}</tbody></table>`;
-  };
-  panel.querySelector('#gpsmRefresh').onclick = load;
-  load();
-};
-
-const GPSM_origLoadProfile = loadProfile;
-loadProfile = async function() {
-  await GPSM_origLoadProfile();
-  gpsmStart();
-};
-
-window.addEventListener('pagehide', gpsmStop);
-window.addEventListener('beforeunload', gpsmStop);
 
 init();
