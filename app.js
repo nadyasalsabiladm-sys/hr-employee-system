@@ -232,12 +232,15 @@ const MASTER = {
   companies:   { label: 'Perusahaan', table: 'companies',   empField: 'company_id',    hasCode: true, hasGeo: true },
   branches:    { label: 'Outlet',     table: 'branches',    empField: 'branch_id',     hasCode: true,  hasCompany: true, companyRequired: true, hasGeo: true },
   departments: { label: 'Departemen', table: 'departments', empField: 'department_id', hasCompany: true },
-  positions:   { label: 'Jabatan',    table: 'positions',   empField: 'position_id',   hasCompany: true }
+  positions:   { label: 'Jabatan',    table: 'positions',   empField: 'position_id',   hasCompany: true },
+  workLocations: { label: 'Lokasi Kerja', table: 'work_locations', empField: 'work_location_id', hasCompany: true, companyRequired: true, hasGeo: true }
 };
 
 const usageCount = (t, id) => t === 'branches'
-  ? state.employees.filter(e => state.currentByEmp[e.id]?.branch_id === id).length   // outlet: berdasarkan penempatan aktif
-  : state.employees.filter(e => e[MASTER[t].empField] === id).length;
+  ? state.employees.filter(e => state.currentByEmp[e.id]?.branch_id === id).length
+  : t === 'workLocations'
+    ? state.employees.filter(e => state.currentByEmp[e.id]?.work_location_id === id).length
+    : state.employees.filter(e => e[MASTER[t].empField] === id).length;
 const companyName = (id, emptyLabel) => id ? (state.companies.find(c => c.id === id)?.name || '-') : emptyLabel;
 const statusBadge = r => `<span class="badge ${isActive(r) ? 'badge-green' : 'badge-gray'}">${isActive(r) ? 'Aktif' : 'Tidak Aktif'}</span>`;
 
@@ -275,7 +278,8 @@ function masterTable(t, rows) {
     companies: [['Nama Perusahaan', nameCol[1]], codeCol, geoCol, stCol, ['Jumlah Outlet', r => state.branches.filter(b => b.company_id === r.id && isActive(b)).length], ['Jumlah Karyawan', cnt]],
     branches: [['Nama Outlet', nameCol[1]], ['Kode Outlet', codeCol[1]], coCol, geoCol, empCol, stCol],
     departments: [['Nama Departemen', nameCol[1]], coCol, empCol, stCol],
-    positions: [['Nama Jabatan', nameCol[1]], coCol, empCol, stCol]
+    positions: [['Nama Jabatan', nameCol[1]], coCol, empCol, stCol],
+    workLocations: [['Nama Lokasi Kerja', nameCol[1]], coCol, ['Alamat', r => esc(r.address || '-')], geoCol, empCol, stCol]
   }[t];
   const actions = r => `<div class="row-actions"><button class="btn btn-light btn-sm" onclick="masterForm('${t}','${esc(r.id)}')">Edit</button>${isActive(r)
     ? `<button class="btn btn-danger btn-sm" onclick="masterDeactivate('${t}','${esc(r.id)}')">Nonaktifkan</button>`
@@ -316,6 +320,7 @@ window.masterForm = (t, id) => {
     <div class="field"><label>Nama ${esc(m.label)} *</label><input name="name" required value="${esc(rec?.name || '')}"></div>
     ${m.hasCode ? `<div class="field"><label>Kode ${esc(m.label)}</label><input name="code" value="${esc(rec?.code || '')}"></div>` : ''}
     ${m.hasCompany ? `<div class="field"><label>Perusahaan${m.companyRequired ? ' *' : ''}</label><select name="company_id" ${m.companyRequired ? 'required' : ''}><option value="">${m.companyRequired ? 'Pilih perusahaan' : 'Semua perusahaan (umum)'}</option>${coOptions}</select></div>` : ''}
+    ${t === 'workLocations' ? `<div class="field field-full"><label>Alamat</label><textarea name="address" rows="2">${esc(rec?.address || '')}</textarea></div>` : ''}
     ${m.hasGeo ? `<div class="field field-full"><label>${t === 'companies' ? 'Lokasi kerja perusahaan (opsional)' : 'Lokasi absensi outlet'}</label><div class="muted">${t === 'companies' ? 'Isi hanya untuk perusahaan tanpa outlet (mis. Zayco Boga Alifa). Perusahaan yang memiliki outlet memakai lokasi outlet.' : 'Isi koordinat outlet untuk mengaktifkan absensi GPS. Kosongkan jika belum diketahui; jangan diisi perkiraan.'}</div></div>
     <div class="field"><label>Latitude</label><input name="${pre}latitude" inputmode="decimal" placeholder="contoh: -6.2088" value="${esc(rec?.[pre + 'latitude'] ?? '')}"></div>
     <div class="field"><label>Longitude</label><input name="${pre}longitude" inputmode="decimal" placeholder="contoh: 106.8456" value="${esc(rec?.[pre + 'longitude'] ?? '')}"></div>
@@ -330,6 +335,7 @@ window.masterForm = (t, id) => {
     const payload = { name };
     if (m.hasCode) payload.code = String(fd.get('code') || '').trim() || null;
     if (m.hasCompany) payload.company_id = fd.get('company_id') || null;
+    if (t === 'workLocations') payload.address = String(fd.get('address') || '').trim() || null;
     if (m.hasGeo) { const g = parseGeo(fd, pre); if (g.error) { toast(g.error, 'error'); return false; } Object.assign(payload, g.values); }
     if (rec) { if (fd.get('is_active') !== null) payload.is_active = fd.get('is_active') === 'true'; }
     else payload.is_active = true;
@@ -465,6 +471,67 @@ function assignmentStatus(a) {
 }
 const EMP_TYPE = { permanent: 'Tetap', contract: 'Kontrak', intern: 'Intern', part_time: 'Part Time', daily: 'Harian' };
 
+window.employeeEditForm = (id) => {
+  const e = state.employees.find(x => x.id === id);
+  if (!e) return;
+  const companyOptions = state.companies.filter(c => isActive(c) || c.id === e.company_id)
+    .map(c => `<option value="${esc(c.id)}" ${e.company_id === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('');
+  const body = `<div class="modal-grid">
+    <div class="field"><label>ID Karyawan *</label><input name="employee_number" required value="${esc(e.employee_number || '')}"></div>
+    <div class="field"><label>Nama Lengkap *</label><input name="full_name" required value="${esc(e.full_name || '')}"></div>
+    <div class="field"><label>NIK</label><input name="nik" inputmode="numeric" value="${esc(e.nik || '')}"></div>
+    <div class="field"><label>Email</label><input name="email" type="email" value="${esc(e.email || '')}"></div>
+    <div class="field"><label>No. HP</label><input name="phone" type="tel" value="${esc(e.phone || '')}"></div>
+    <div class="field"><label>Tanggal Masuk *</label><input name="join_date" type="date" required value="${esc(e.join_date || '')}"></div>
+    <div class="field"><label>Perusahaan *</label><select name="company_id" required>${companyOptions}</select></div>
+    <div class="field"><label>Departemen</label><select name="department_id"></select></div>
+    <div class="field"><label>Jabatan</label><select name="position_id"></select></div>
+    <div class="field"><label>Status</label><select name="employment_status"><option value="active" ${e.employment_status === 'active' ? 'selected' : ''}>Aktif</option><option value="inactive" ${e.employment_status === 'inactive' ? 'selected' : ''}>Tidak Aktif</option></select></div>
+    <div class="field"><label>Tipe</label><select name="employment_type"><option value="permanent" ${e.employment_type === 'permanent' ? 'selected' : ''}>Tetap</option><option value="contract" ${e.employment_type === 'contract' ? 'selected' : ''}>Kontrak</option><option value="intern" ${e.employment_type === 'intern' ? 'selected' : ''}>Intern</option><option value="part_time" ${e.employment_type === 'part_time' ? 'selected' : ''}>Part Time</option><option value="daily" ${e.employment_type === 'daily' ? 'selected' : ''}>Harian</option></select></div>
+    <div class="field field-full"><div class="muted">Lokasi/outlet tidak diedit di sini. Gunakan <b>Riwayat Penempatan</b> agar setiap mutasi tetap tercatat.</div></div>
+  </div>`;
+  const modal = openModal('Edit Data Karyawan', body, async form => {
+    const fd = new FormData(form);
+    const employee_number = String(fd.get('employee_number') || '').trim();
+    const full_name = String(fd.get('full_name') || '').trim();
+    const join_date = fd.get('join_date') || '';
+    const company_id = fd.get('company_id') || null;
+    if (!employee_number || !full_name || !join_date || !company_id) { toast('Lengkapi field bertanda *.', 'error'); return false; }
+    const dup = state.employees.find(x => x.id !== id && String(x.employee_number || '').toLowerCase() === employee_number.toLowerCase());
+    if (dup) { toast(`ID Karyawan "${employee_number}" sudah dipakai oleh ${dup.full_name}.`, 'error'); return false; }
+    const payload = {
+      employee_number, full_name,
+      nik: String(fd.get('nik') || '').trim() || null,
+      email: String(fd.get('email') || '').trim() || null,
+      phone: String(fd.get('phone') || '').trim() || null,
+      join_date, company_id,
+      department_id: fd.get('department_id') || null,
+      position_id: fd.get('position_id') || null,
+      employment_status: fd.get('employment_status') || 'active',
+      employment_type: fd.get('employment_type') || null
+    };
+    const res = await sb.from('employees').update(payload).eq('id', id).select();
+    if (res.error) { toast(friendlyError(res.error), 'error'); return false; }
+    if (!res.data || !res.data.length) { toast(PERMISSION_MSG, 'error'); return false; }
+    toast(`Data karyawan "${full_name}" berhasil diperbarui.`);
+    return true;
+  }, 'Simpan', () => showEmployeeDetail(id));
+  const sel = n => modal.querySelector(`[name="${n}"]`);
+  const fill = (name, items, placeholder, current) => {
+    sel(name).innerHTML = `<option value="">${placeholder}</option>` + items.map(x => `<option value="${esc(x.id)}" ${current === x.id ? 'selected' : ''}>${esc(x.name)}${isActive(x) ? '' : ' (nonaktif)'}</option>`).join('');
+  };
+  const refresh = () => {
+    const cid = sel('company_id').value;
+    const depts = state.departments.filter(d => isActive(d) && (d.company_id === cid || !d.company_id) || d.id === e.department_id);
+    const poss = state.positions.filter(p => isActive(p) && (p.company_id === cid || !p.company_id) || p.id === e.position_id);
+    fill('department_id', cid ? depts : [], cid ? 'Pilih departemen' : 'Pilih perusahaan dulu', e.department_id);
+    fill('position_id', cid ? poss : [], cid ? 'Pilih jabatan' : 'Pilih perusahaan dulu', e.position_id);
+    sel('department_id').disabled = sel('position_id').disabled = !cid;
+  };
+  sel('company_id').onchange = refresh;
+  refresh();
+};
+
 window.showEmployeeDetail = id => {
   const e = state.employees.find(x => x.id === id);
   if (!e) { toast('Data karyawan tidak ditemukan.', 'error'); return; }
@@ -475,16 +542,16 @@ window.showEmployeeDetail = id => {
   const modal = document.createElement('div');
   modal.className = 'modal-backdrop'; modal.id = 'detailModal';
   modal.innerHTML = `<div class="modal modal-wide">
-    <div class="section-head"><h2>${esc(e.full_name)}</h2><button type="button" class="btn btn-light" data-close>Tutup</button></div>
+    <div class="section-head"><h2>${esc(e.full_name)}</h2><div style="display:flex;gap:8px"><button type="button" class="btn btn-primary" onclick="employeeEditForm('${esc(id)}')">Edit Data</button><button type="button" class="btn btn-light" data-close>Tutup</button></div></div>
     <h3 class="sub-title">Profil Karyawan</h3>
     <div class="detail-grid">
       ${item('ID Karyawan', e.employee_number)}${item('Nama Lengkap', e.full_name)}${item('NIK', e.nik)}
       ${item('No. HP', e.phone)}${item('Email', e.email)}${item('Perusahaan', e.companies?.name)}
       ${item('Departemen', e.departments?.name)}${item('Jabatan', e.positions?.name)}${item('Status', e.employment_status === 'active' ? 'Aktif' : e.employment_status === 'inactive' ? 'Tidak Aktif' : e.employment_status)}
-      ${item('Tipe Karyawan', EMP_TYPE[e.employment_type] || e.employment_type)}${item('Tanggal Masuk', e.join_date ? fmtDate(e.join_date) : '')}${item('Outlet Saat Ini', currentOutletName(id))}
+      ${item('Tipe Karyawan', EMP_TYPE[e.employment_type] || e.employment_type)}${item('Tanggal Masuk', e.join_date ? fmtDate(e.join_date) : '')}${item('Lokasi Saat Ini', currentOutletName(id))}
     </div>
     <div class="section-head" style="margin-top:22px"><h3 class="sub-title" style="margin:0">Riwayat Penempatan</h3><button type="button" class="btn btn-primary" onclick="assignmentForm('${esc(id)}')">+ Tambah Penempatan</button></div>
-    ${rows.length ? `<div class="table-wrap"><table class="table"><thead><tr><th>Outlet</th><th>Mulai</th><th>Selesai</th><th>Status</th><th>Catatan</th><th>Aksi</th></tr></thead><tbody>${rows.map(a => { const st = assignmentStatus(a); return `<tr><td><b>${esc(assignmentOutlet(a))}</b></td><td>${fmtDate(a.start_date)}</td><td>${fmtDate(a.end_date)}</td><td><span class="badge ${st.cls}">${st.label}</span></td><td>${esc(a.notes || '-')}</td><td><button class="btn btn-light btn-sm" onclick="assignmentForm('${esc(id)}','${esc(a.id)}')">Edit</button></td></tr>`; }).join('')}</tbody></table></div>` : '<div class="card empty">Belum ada riwayat penempatan.</div>'}
+    ${rows.length ? `<div class="table-wrap"><table class="table"><thead><tr><th>Outlet / Lokasi Kerja</th><th>Mulai</th><th>Selesai</th><th>Status</th><th>Catatan</th><th>Aksi</th></tr></thead><tbody>${rows.map(a => { const st = assignmentStatus(a); return `<tr><td><b>${esc(assignmentOutlet(a))}</b></td><td>${fmtDate(a.start_date)}</td><td>${fmtDate(a.end_date)}</td><td><span class="badge ${st.cls}">${st.label}</span></td><td>${esc(a.notes || '-')}</td><td><button class="btn btn-light btn-sm" onclick="assignmentForm('${esc(id)}','${esc(a.id)}')">Edit</button></td></tr>`; }).join('')}</tbody></table></div>` : '<div class="card empty">Belum ada riwayat penempatan.</div>'}
   </div>`;
   document.body.appendChild(modal);
   modal.querySelectorAll('[data-close]').forEach(b => b.onclick = () => modal.remove());
