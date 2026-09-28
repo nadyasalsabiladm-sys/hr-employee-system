@@ -2976,3 +2976,117 @@ window.employeeEditForm = function(id) {
 };
 
 console.log('HR Employee System Phase 6B loaded: Supervisor field in Employee Edit');
+/* =========================================================
+   PHASE 6D-2 — EMPLOYEE ACCESS + PIN + SPV APPROVAL
+   Employee access does NOT create Supabase Auth accounts.
+   ========================================================= */
+
+const EMP_PORTAL_KEY = 'hr_employee_portal_session';
+let empPortal = { token: null, employee: null, loading: false };
+
+function empSessionGet(){ try{return JSON.parse(localStorage.getItem(EMP_PORTAL_KEY)||'null');}catch(_){return null;} }
+function empSessionSet(v){ if(v)localStorage.setItem(EMP_PORTAL_KEY,JSON.stringify(v)); else localStorage.removeItem(EMP_PORTAL_KEY); }
+function empPortalIsSupervisor(){ return String(empPortal.employee?.is_supervisor || false)==='true'; }
+
+async function empRpc(name, args={}){
+  if(!empPortal.token) throw new Error('Sesi karyawan belum aktif.');
+  const {data,error}=await sb.rpc(name,{p_token:empPortal.token,...args});
+  if(error) throw error;
+  return data;
+}
+
+async function employeeLogin(employeeNumber,pin){
+  const {data,error}=await sb.rpc('employee_login',{p_employee_number:String(employeeNumber||'').trim(),p_pin:String(pin||'')});
+  if(error) throw error;
+  if(!data?.token) throw new Error('Login karyawan gagal.');
+  empPortal.token=data.token; empPortal.employee=data.employee;
+  empSessionSet({token:data.token,employee:data.employee});
+  renderEmployeePortal();
+}
+
+function renderEmployeeLogin(msg=''){
+  document.querySelector('#app').innerHTML=`<div class="login"><form class="login-card" id="employeeLoginForm"><div class="brand">HR Employee System</div><div class="subtitle">Portal Karyawan</div><div class="field"><label>ID Karyawan</label><input id="empNumber" inputmode="numeric" autocomplete="username" required placeholder="Contoh: 2025001004"></div><div class="field"><label>PIN</label><input id="empPin" type="password" inputmode="numeric" autocomplete="current-password" minlength="6" maxlength="12" required placeholder="PIN karyawan"></div>${msg?`<div class="error">${esc(msg)}</div>`:''}<button class="btn btn-primary btn-block">Masuk sebagai Karyawan</button><button type="button" class="btn btn-light btn-block" id="backAdminLogin">Login Admin / HR</button></form></div>`;
+  $('#employeeLoginForm').addEventListener('submit',async e=>{e.preventDefault();const b=e.target.querySelector('button[type="submit"]');b.disabled=true;b.textContent='Memeriksa...';try{await employeeLogin($('#empNumber').value,$('#empPin').value);}catch(err){renderEmployeeLogin(friendlyError(err));}finally{if(document.body.contains(b)){b.disabled=false;b.textContent='Masuk sebagai Karyawan';}}});
+  $('#backAdminLogin').onclick=()=>renderLogin();
+}
+
+async function employeeBootstrap(){
+  const s=empSessionGet(); if(!s?.token) return false;
+  empPortal.token=s.token; empPortal.employee=s.employee||null;
+  try{
+    const me=await empRpc('employee_me');
+    if(!me?.employee) throw new Error('Sesi karyawan tidak valid.');
+    empPortal.employee=me.employee; empSessionSet({token:empPortal.token,employee:empPortal.employee});
+    renderEmployeePortal(); return true;
+  }catch(_){empPortal={token:null,employee:null,loading:false};empSessionSet(null);return false;}
+}
+
+function employeeLogout(){ empPortal={token:null,employee:null,loading:false}; empSessionSet(null); renderLogin(); }
+
+async function employeeLeaveList(){ return await empRpc('employee_leave_list'); }
+
+async function employeeApproveLeave(id,decision){
+  const note=decision==='rejected'?(prompt('Catatan penolakan (opsional):')||null):null;
+  const data=await empRpc('employee_approve_leave',{p_leave_request_id:id,p_decision:decision,p_note:note});
+  toast(decision==='approved'?'Pengajuan berhasil disetujui.':'Pengajuan berhasil ditolak.');
+  renderEmployeePortal(); return data;
+}
+
+async function renderEmployeePortal(){
+  if(!empPortal.employee){renderEmployeeLogin();return;}
+  const e=empPortal.employee;
+  const sup=!!e.is_supervisor;
+  document.querySelector('#app').innerHTML=`<div class="shell"><aside class="sidebar"><div class="logo">Employee Portal</div><div class="nav"><button class="active" data-ep-view="home">Dashboard</button><button data-ep-view="attendance">Absensi</button>${sup?'<button data-ep-view="approval">Approval Tim</button>':''}<button data-ep-view="leave">Cuti / Izin</button></div></aside><main class="main"><div class="topbar"><h1>Portal Karyawan</h1><div class="userbox"><span>${esc(e.full_name||'-')} <span class="muted">(${esc(e.employee_number||'-')})</span></span><span class="avatar">${esc((e.full_name||'K')[0].toUpperCase())}</span><button id="epLogout" class="btn btn-light">Keluar</button></div></div><div id="epContent"></div></main></div>`;
+  document.querySelectorAll('[data-ep-view]').forEach(b=>b.onclick=()=>employeePortalView(b.dataset.epView));
+  $('#epLogout').onclick=employeeLogout;
+  employeePortalView('home');
+}
+
+async function employeePortalView(view){
+  const box=$('#epContent'); if(!box)return;
+  const e=empPortal.employee;
+  if(view==='home'){
+    let leaveCount=0; try{const rows=await employeeLeaveList();leaveCount=rows?.length||0;}catch(_){ }
+    box.innerHTML=`<div class="cards"><div class="card"><div class="muted">Nama</div><div class="metric" style="font-size:22px">${esc(e.full_name||'-')}</div><div class="muted">ID ${esc(e.employee_number||'-')}</div></div><div class="card"><div class="muted">Jabatan</div><div class="metric" style="font-size:22px">${esc(e.position_name||'-')}</div></div><div class="card"><div class="muted">Status</div><div class="metric" style="font-size:22px">${esc(e.employment_status||'-')}</div></div>${e.is_supervisor?`<div class="card"><div class="muted">Approval Tim</div><div class="metric">${esc(e.subordinate_count||0)}</div><div class="muted">bawahan</div></div>`:''}</div><div class="section"><div class="section-head"><h2>Akses Karyawan</h2></div><div class="info-box">Gunakan menu Absensi untuk absen dengan selfie + GPS. ${e.is_supervisor?'Sebagai Supervisor, menu Approval Tim digunakan untuk menyetujui cuti/izin bawahan.':''}</div></div>`;
+  } else if(view==='approval'){
+    box.innerHTML='<div class="card empty">Memuat pengajuan tim...</div>';
+    try{const rows=await empRpc('employee_supervisor_queue');box.innerHTML=employeeApprovalHtml(rows||[]);}catch(err){box.innerHTML=`<div class="card"><div class="error">${esc(friendlyError(err))}</div></div>`;}
+  } else if(view==='leave'){
+    box.innerHTML='<div class="card empty">Memuat pengajuan...</div>';
+    try{const rows=await employeeLeaveList();box.innerHTML=employeeLeaveHtml(rows||[]);}catch(err){box.innerHTML=`<div class="card"><div class="error">${esc(friendlyError(err))}</div></div>`;}
+  } else if(view==='attendance'){
+    box.innerHTML=`<div class="section"><div class="section-head"><h2>Absensi</h2></div><div class="info-box">Modul absensi selfie + GPS tetap menggunakan mesin absensi yang sudah dibuat. Integrasi Employee Portal dengan pengiriman foto akan kita aktifkan pada tahap berikutnya setelah jalur session karyawan ini selesai diuji.</div></div>`;
+  }
+}
+
+function employeeApprovalHtml(rows){
+  if(!rows.length)return '<div class="card empty">Tidak ada pengajuan yang menunggu approval Anda.</div>';
+  return `<div class="section"><div class="section-head"><h2>Approval Tim</h2><span class="muted">Hanya bawahan yang terdaftar sebagai tim Anda.</span></div><div class="table-wrap"><table class="table"><thead><tr><th>Karyawan</th><th>Jenis</th><th>Periode</th><th>Hari</th><th>Status</th><th>Aksi</th></tr></thead><tbody>${rows.map(r=>`<tr><td><b>${esc(r.employee_name||'-')}</b><div class="muted">${esc(r.employee_number||'-')}</div></td><td>${esc(r.leave_type_name||'-')}</td><td>${fmtDate(r.start_date)} — ${fmtDate(r.end_date)}</td><td>${esc(r.total_days||'-')}</td><td>${esc(r.status_label||'Menunggu SPV')}</td><td><div class="row-actions"><button class="btn btn-primary btn-sm" onclick="employeeApproveLeave('${esc(r.id)}','approved')">Setujui</button><button class="btn btn-light btn-sm" onclick="employeeApproveLeave('${esc(r.id)}','rejected')">Tolak</button></div></td></tr>`).join('')}</tbody></table></div></div>`;
+}
+function employeeLeaveHtml(rows){
+  if(!rows.length)return '<div class="card empty">Belum ada pengajuan cuti/izin.</div>';
+  return `<div class="section"><div class="section-head"><h2>Pengajuan Saya</h2></div><div class="table-wrap"><table class="table"><thead><tr><th>Jenis</th><th>Periode</th><th>Hari</th><th>Status</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${esc(r.leave_type_name||'-')}</td><td>${fmtDate(r.start_date)} — ${fmtDate(r.end_date)}</td><td>${esc(r.total_days||'-')}</td><td>${esc(r.status_label||'-')}</td></tr>`).join('')}</tbody></table></div></div>`;
+}
+
+// Tambahkan pilihan Portal Karyawan pada login admin yang sudah ada.
+const __renderAdminLogin = renderLogin;
+renderLogin = function(msg=''){
+  __renderAdminLogin(msg);
+  const form=$('#loginForm'); if(!form)return;
+  const b=document.createElement('button'); b.type='button'; b.className='btn btn-light btn-block'; b.textContent='Login Karyawan'; b.onclick=()=>renderEmployeeLogin();
+  form.appendChild(b);
+};
+
+// Employee session dimulai terpisah dari Supabase Auth admin.
+const __initEmployeePortal = async()=>{ if(await employeeBootstrap()) return true; return false; };
+
+// Jika ada session karyawan tersimpan, gunakan portal karyawan; jika tidak, alur admin tetap normal.
+const __origInit = init;
+init = async function(){
+  if(!configured()){renderConfigHelp();return;}
+  sb=window.supabase.createClient(cfg.SUPABASE_URL,cfg.SUPABASE_ANON_KEY);
+  const emp=await __initEmployeePortal(); if(emp)return;
+  await __origInit();
+};
+
+console.log('HR Employee System Phase 6D-2 loaded: Employee Login + PIN + SPV Portal');
