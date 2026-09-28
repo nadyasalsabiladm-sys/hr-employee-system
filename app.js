@@ -927,4 +927,178 @@ window.attDetail = id => {
   });
 };
 
+
+/* =====================================================================
+   PHASE 3B — GPS MONITORING KHUSUS KARYAWAN TERTENTU
+   - Hanya karyawan yang diaktifkan HR yang dimonitor.
+   - Checkpoint diambil berkala saat karyawan sedang absen masuk.
+   - Website tidak dapat menjamin GPS background ketika browser ditutup/dibekukan.
+   ===================================================================== */
+const GPSM = {
+  timer: null,
+  busy: false,
+  context: null,
+  lastContextAt: 0,
+  employeeId: null
+};
+
+async function gpsmLoadContext() {
+  if (!sb || !state.session) return null;
+  const { data, error } = await sb.rpc('attendance_monitoring_context');
+  if (error) return null;
+  GPSM.context = data;
+  GPSM.lastContextAt = Date.now();
+  GPSM.employeeId = data?.employee_id || null;
+  return data;
+}
+
+async function gpsmCheckpoint(force = false) {
+  if (GPSM.busy || !state.session) return;
+  const c = GPSM.context || await gpsmLoadContext();
+  if (!c?.linked || !c.enabled || !c.attendance_active) return;
+  if (!navigator.geolocation) return;
+
+  const last = c.last_checkpoint_at ? new Date(c.last_checkpoint_at).getTime() : 0;
+  const interval = Math.max(15, Number(c.interval_minutes || 60)) * 60000;
+  if (!force && last && Date.now() < last + interval - 15000) return;
+
+  GPSM.busy = true;
+  navigator.geolocation.getCurrentPosition(async pos => {
+    try {
+      const { error } = await sb.rpc('submit_location_checkpoint', {
+        p_latitude: pos.coords.latitude,
+        p_longitude: pos.coords.longitude,
+        p_accuracy: pos.coords.accuracy
+      });
+      if (!error) await gpsmLoadContext();
+    } finally {
+      GPSM.busy = false;
+    }
+  }, () => { GPSM.busy = false; }, {
+    enableHighAccuracy: true,
+    timeout: 20000,
+    maximumAge: 0
+  });
+}
+
+function gpsmStart() {
+  if (GPSM.timer) return;
+  gpsmLoadContext().then(c => {
+    if (c?.enabled) gpsmCheckpoint(false);
+  });
+  GPSM.timer = setInterval(async () => {
+    const c = await gpsmLoadContext();
+    if (c?.enabled && c?.attendance_active) gpsmCheckpoint(false);
+  }, 60000);
+}
+
+function gpsmStop() {
+  if (GPSM.timer) clearInterval(GPSM.timer);
+  GPSM.timer = null;
+  GPSM.context = null;
+}
+
+async function gpsmSave(employeeId, enabled, intervalMinutes) {
+  const { error } = await sb.from('employee_attendance_monitoring').upsert({
+    employee_id: employeeId,
+    enabled: !!enabled,
+    interval_minutes: Number(intervalMinutes || 60),
+    updated_at: new Date().toISOString()
+  }, { onConflict: 'employee_id' });
+  if (error) { toast(friendlyError(error), 'error'); return false; }
+  toast(enabled ? `Monitoring GPS diaktifkan (${intervalMinutes} menit).` : 'Monitoring GPS dinonaktifkan.');
+  return true;
+}
+
+async function gpsmEmployeeSetting(employeeId) {
+  const { data, error } = await sb.from('employee_attendance_monitoring')
+    .select('*').eq('employee_id', employeeId).maybeSingle();
+  if (error) return null;
+  return data || { employee_id: employeeId, enabled: false, interval_minutes: 60 };
+}
+
+function gpsmAttachEmployeeBox(modal) {
+  if (!modal || modal.querySelector('#gpsMonitoringBox')) return;
+  const title = modal.querySelector('.section-head h2');
+  const emp = state.employees.find(x => x.full_name === title?.textContent);
+  if (!emp) return;
+
+  const host = modal.querySelector('.modal');
+  if (!host) return;
+  const box = document.createElement('div');
+  box.id = 'gpsMonitoringBox';
+  box.style.cssText = 'margin-top:22px;padding:16px;border:1px solid var(--border,#ddd);border-radius:12px;background:var(--surface,#fff)';
+  box.innerHTML = `<div class="section-head" style="margin:0 0 10px"><h3 class="sub-title" style="margin:0">Monitoring GPS</h3><span id="gpsmBadge" class="badge badge-gray">Memuat...</span></div>
+    <div class="muted" style="margin-bottom:12px">Khusus karyawan tertentu. Lokasi dicek berkala selama absensi aktif; bukan pelacakan GPS terus-menerus.</div>
+    <div class="modal-grid">
+      <div class="field"><label><input type="checkbox" id="gpsmEnabled"> Aktifkan monitoring GPS</label></div>
+      <div class="field"><label>Interval checkpoint</label><select id="gpsmInterval"><option value="15">Setiap 15 menit</option><option value="30">Setiap 30 menit</option><option value="60">Setiap 60 menit</option><option value="120">Setiap 120 menit</option></select></div>
+    </div>
+    <button type="button" class="btn btn-primary" id="gpsmSave">Simpan Pengaturan GPS</button>`;
+  host.appendChild(box);
+
+  (async () => {
+    const cfgm = await gpsmEmployeeSetting(emp.id);
+    if (!box.isConnected) return;
+    $('#gpsmEnabled').checked = !!cfgm?.enabled;
+    $('#gpsmInterval').value = String(cfgm?.interval_minutes || 60);
+    const badge = $('#gpsmBadge');
+    badge.textContent = cfgm?.enabled ? 'Aktif' : 'Tidak aktif';
+    badge.className = 'badge ' + (cfgm?.enabled ? 'badge-green' : 'badge-gray');
+    $('#gpsmSave').onclick = async () => {
+      const btn = $('#gpsmSave'); btn.disabled = true;
+      const ok = await gpsmSave(emp.id, $('#gpsmEnabled').checked, $('#gpsmInterval').value);
+      btn.disabled = false;
+      if (ok) {
+        badge.textContent = $('#gpsmEnabled').checked ? 'Aktif' : 'Tidak aktif';
+        badge.className = 'badge ' + ($('#gpsmEnabled').checked ? 'badge-green' : 'badge-gray');
+      }
+    };
+  })();
+}
+
+const GPSM_detailObserver = new MutationObserver(() => {
+  const modal = document.querySelector('#detailModal');
+  if (modal) gpsmAttachEmployeeBox(modal);
+});
+GPSM_detailObserver.observe(document.body, { childList: true, subtree: true });
+
+const GPSM_origRenderAttHistory = renderAttHistory;
+renderAttHistory = function() {
+  GPSM_origRenderAttHistory();
+  const box = $('#attHistory');
+  if (!box || !state.profile) return;
+  const existing = $('#gpsmAdminPanel');
+  if (existing) existing.remove();
+  const panel = document.createElement('div');
+  panel.id = 'gpsmAdminPanel';
+  panel.className = 'section';
+  panel.innerHTML = `<div class="section-head"><h2>Monitoring GPS</h2><button class="btn btn-light btn-sm" id="gpsmRefresh">Refresh</button></div><div class="card empty">Memuat checkpoint GPS...</div>`;
+  box.parentNode.appendChild(panel);
+  const load = async () => {
+    const from = state.attF.from || todayJakarta(), to = state.attF.to || todayJakarta();
+    const { data, error } = await sb.from('attendance_location_checkpoints')
+      .select('*, employees(full_name, employee_number, company_id)')
+      .gte('attendance_date', from).lte('attendance_date', to)
+      .order('captured_at', { ascending: false }).limit(1000);
+    const host = panel.querySelector('.card');
+    if (error) { host.className = 'card error'; host.textContent = friendlyError(error); return; }
+    const rows = data || [];
+    if (!rows.length) { host.className = 'card empty'; host.textContent = 'Belum ada checkpoint GPS.'; return; }
+    host.className = 'table-wrap';
+    host.innerHTML = `<table class="table"><thead><tr><th>Waktu</th><th>Karyawan</th><th>Lokasi</th><th>Akurasi</th><th>Jarak</th><th>Status</th></tr></thead><tbody>${rows.map(r => `<tr><td>${esc(fmtDateTime(r.captured_at,'Asia/Jakarta'))}</td><td><b>${esc(r.employees?.full_name || '-')}</b><div class="muted">${esc(r.employees?.employee_number || '')}</div></td><td>${esc(attLocation(r))}</td><td>${Math.round(Number(r.accuracy_meter || 0))} m</td><td>${r.distance_meter == null ? '-' : Math.round(Number(r.distance_meter)) + ' m'}</td><td>${r.inside_area ? '<span class="badge badge-green">Di area</span>' : '<span class="badge badge-red">Di luar area</span>'}</td></tr>`).join('')}</tbody></table>`;
+  };
+  panel.querySelector('#gpsmRefresh').onclick = load;
+  load();
+};
+
+const GPSM_origLoadProfile = loadProfile;
+loadProfile = async function() {
+  await GPSM_origLoadProfile();
+  gpsmStart();
+};
+
+window.addEventListener('pagehide', gpsmStop);
+window.addEventListener('beforeunload', gpsmStop);
+
 init();
