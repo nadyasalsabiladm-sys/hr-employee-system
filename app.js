@@ -97,7 +97,7 @@ async function loadProfile() {
   renderApp();
 }
 
-async function loadAllBase() {
+async function loadAll() {
   const queries = await Promise.all([
     sb.from('employees').select('*, companies(name), branches(name), departments(name), positions(name)').order('full_name'),
     sb.from('contracts').select('*').order('end_date', { ascending: true }),
@@ -2476,240 +2476,492 @@ function contracts() {
       `}
     </div>`;
 }
-/* =========================================================
-   PHASE 6 — IZIN & CUTI
-   Dashboard, pengajuan, saldo, approval, riwayat & kalender.
-   ========================================================= */
+/* =====================================================================
+   PHASE 6 — CUTI & IZIN + APPROVAL SPV / HR
+   Tempel di PALING BAWAH app.js Phase 5.
+   ===================================================================== */
 
-state.leaveTypes = state.leaveTypes || [];
-state.leaveBalances = state.leaveBalances || [];
-state.leaveApprovals = state.leaveApprovals || [];
-state.leaveDays = state.leaveDays || [];
-state.leaveF = state.leaveF || { q:'', type:'', status:'', from:'', to:'' };
-
-/* ---------- Phase 6 data loader ---------- */
-const phase6OriginalLoadAll = loadAllBase;
-async function loadAll() {
-  await phase6OriginalLoadAll();
-  const qs = await Promise.all([
-    sb.from('leave_types').select('*').order('name'),
-    sb.from('leave_balances').select('*'),
-    sb.from('leave_approvals').select('*').order('created_at', { ascending: false }),
-    sb.from('leave_days').select('*').order('leave_date', { ascending: true })
-  ]);
-  const names = ['jenis cuti/izin','saldo cuti','approval cuti','detail hari cuti'];
-  qs.forEach((q,i) => {
-    if (q.error) toast('Gagal memuat ' + names[i] + ': ' + friendlyError(q.error), 'error');
-  });
-  state.leaveTypes = qs[0].data || [];
-  state.leaveBalances = qs[1].data || [];
-  state.leaveApprovals = qs[2].data || [];
-  state.leaveDays = qs[3].data || [];
-}
-
-function leaveStatusBadge(s) {
-  const x = String(s || '').toLowerCase();
-  const cls = x === 'approved' ? 'badge-green' : x === 'rejected' ? 'badge-red' : x === 'cancelled' ? 'badge-gray' : 'badge-yellow';
-  const label = ({pending:'Menunggu',approved:'Disetujui',rejected:'Ditolak',cancelled:'Dibatalkan'})[x] || s || '-';
-  return `<span class="badge ${cls}">${esc(label)}</span>`;
-}
-
-function leaveTypeName(id) {
-  return state.leaveTypes.find(x => x.id === id)?.name || '-';
-}
-
-function leaveCategory(id) {
-  return state.leaveTypes.find(x => x.id === id)?.category || '';
-}
-
-function leaveEmployeeName(id) {
-  return state.employees.find(x => x.id === id)?.full_name || '-';
-}
-
-function leaveQuotaFor(employeeId, typeId, year) {
-  const b = state.leaveBalances.find(x => x.employee_id === employeeId && x.leave_type_id === typeId && Number(x.year) === Number(year));
-  if (b) {
-    const direct = ['remaining_days','balance_days','remaining','sisa_days','saldo'].map(k => b[k]).find(v => v !== undefined && v !== null);
-    if (direct !== undefined) return Number(direct) || 0;
-    const quota = Number(b.quota_days ?? b.entitlement_days ?? b.opening_balance ?? state.leaveTypes.find(x=>x.id===typeId)?.quota_days ?? 0) || 0;
-    const used = Number(b.used_days ?? 0) || 0;
-    const adj = Number(b.adjustment_days ?? b.adjustment ?? 0) || 0;
-    return quota + adj - used;
-  }
-  const t = state.leaveTypes.find(x => x.id === typeId);
-  const quota = Number(t?.quota_days ?? 0) || 0;
-  const used = state.leave.filter(x => x.employee_id === employeeId && x.leave_type_id === typeId && String(x.status).toLowerCase() === 'approved' && String(x.start_date || '').startsWith(String(year))).reduce((n,x)=>n + Number(x.total_days || 0),0);
-  return quota - used;
-}
-
-function leaveCalcDays(start, end, halfDay) {
-  if (!start || !end || end < start) return 0;
-  const a = new Date(start + 'T00:00:00Z'), b = new Date(end + 'T00:00:00Z');
-  let n = Math.floor((b-a)/86400000)+1;
-  if (halfDay && n === 1) n = 0.5;
-  return n;
-}
-
-function leaveCanApprove(r) {
-  return String(r?.status || '').toLowerCase() === 'pending';
-}
-
-async function leaveUpdateStatus(id, status, note='') {
-  const payload = { status };
-  const extra = status === 'approved'
-    ? { approved_at:new Date().toISOString(), approved_by:state.profile?.id || null, approval_notes:note || null }
-    : { rejected_at: status === 'rejected' ? new Date().toISOString() : null, rejected_by: status === 'rejected' ? (state.profile?.id || null) : null, approval_notes:note || null };
-  let res = await sb.from('leave_requests').update({...payload,...extra}).eq('id',id).select();
-  if (res.error && /column .* does not exist|schema cache|PGRST204/i.test(res.error.message || '')) {
-    res = await sb.from('leave_requests').update(payload).eq('id',id).select();
-  }
-  if (res.error) { toast(friendlyError(res.error),'error'); return false; }
-  // Approval history is best-effort so an older migration cannot block approval.
-  const approvalPayloads = [
-    { leave_request_id:id, approver_id:state.profile?.id || null, status, notes:note || null, acted_at:new Date().toISOString() },
-    { leave_request_id:id, approved_by:state.profile?.id || null, status, notes:note || null, approved_at:new Date().toISOString() },
-    { leave_request_id:id, status, notes:note || null }
-  ];
-  for (const p of approvalPayloads) {
-    const a = await sb.from('leave_approvals').insert(p).select();
-    if (!a.error) break;
-    if (!/column .* does not exist|schema cache|PGRST204/i.test(a.error.message || '')) break;
-  }
-  await loadAll(); renderApp(); return true;
-}
-
-window.leaveApprove = async id => {
-  const r = state.leave.find(x => x.id === id); if (!r || !leaveCanApprove(r)) return;
-  const note = prompt('Catatan approval (opsional):','') ?? '';
-  if (!confirm('Setujui pengajuan cuti/izin ini?')) return;
-  await leaveUpdateStatus(id,'approved',note);
-};
-window.leaveReject = async id => {
-  const r = state.leave.find(x => x.id === id); if (!r || !leaveCanApprove(r)) return;
-  const note = prompt('Alasan penolakan:','') ?? '';
-  if (!note.trim()) { toast('Alasan penolakan wajib diisi.','error'); return; }
-  if (!confirm('Tolak pengajuan cuti/izin ini?')) return;
-  await leaveUpdateStatus(id,'rejected',note);
-};
-window.leaveCancel = async id => {
-  const r = state.leave.find(x => x.id === id); if (!r) return;
-  if (!confirm('Batalkan pengajuan ini?')) return;
-  await leaveUpdateStatus(id,'cancelled','Dibatalkan oleh HR.');
+const PHASE6_LEAVE = {
+  annualCode: 'ANNUAL',
+  year: new Date().getFullYear()
 };
 
-function leaveOpenForm(existing=null) {
-  const activeEmployees = state.employees.filter(e => e.employment_status !== 'inactive');
-  const types = state.leaveTypes.filter(isActive);
-  const selected = existing || {};
-  const body = `
-    <div class="grid-2">
-      <div class="field field-full"><label>Karyawan *</label><select name="employee_id" required><option value="">Pilih karyawan</option>${activeEmployees.map(e=>`<option value="${esc(e.id)}" ${selected.employee_id===e.id?'selected':''}>${esc(e.full_name)} — ${esc(e.employee_number||'')}</option>`).join('')}</select></div>
-      <div class="field"><label>Jenis Cuti / Izin *</label><select name="leave_type_id" required><option value="">Pilih jenis</option>${types.map(t=>`<option value="${esc(t.id)}" ${selected.leave_type_id===t.id?'selected':''}>${esc(t.name)}${t.category?` — ${esc(t.category)}`:''}</option>`).join('')}</select></div>
-      <div class="field"><label>Status</label><select name="status"><option value="pending" ${(!selected.status||selected.status==='pending')?'selected':''}>Menunggu</option><option value="approved" ${selected.status==='approved'?'selected':''}>Disetujui</option><option value="rejected" ${selected.status==='rejected'?'selected':''}>Ditolak</option></select></div>
-      <div class="field"><label>Tanggal Mulai *</label><input name="start_date" type="date" required value="${esc(selected.start_date||'')}"></div>
-      <div class="field"><label>Tanggal Selesai *</label><input name="end_date" type="date" required value="${esc(selected.end_date||'')}"></div>
-      <div class="field"><label>Setengah Hari</label><select name="half_day"><option value="false">Tidak</option><option value="true" ${selected.half_day?'selected':''}>Ya</option></select></div>
-      <div class="field"><label>Total Hari</label><input name="total_days" type="number" min="0.5" step="0.5" value="${esc(selected.total_days ?? '')}" readonly></div>
-      <div class="field field-full"><label>Alasan / Keterangan</label><textarea name="reason" rows="3" placeholder="Alasan cuti/izin...">${esc(selected.reason||'')}</textarea></div>
-      <div class="field field-full"><label>Dokumen Pendukung (opsional)</label><input name="leave_file" type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"></div>
-      <div class="field field-full"><label>Catatan HR</label><textarea name="notes" rows="2">${esc(selected.notes||'')}</textarea></div>
-    </div>`;
-  const modal = openModal(existing ? 'Edit Pengajuan Cuti / Izin' : 'Pengajuan Cuti / Izin', body, async form => {
-    const fd = new FormData(form);
-    const employee_id = fd.get('employee_id') || '';
-    const leave_type_id = fd.get('leave_type_id') || '';
-    const start_date = fd.get('start_date') || '';
-    const end_date = fd.get('end_date') || '';
-    const half_day = fd.get('half_day') === 'true';
-    if (!employee_id || !leave_type_id || !start_date || !end_date) { toast('Lengkapi karyawan, jenis dan tanggal.','error'); return false; }
-    if (end_date < start_date) { toast('Tanggal selesai tidak boleh sebelum tanggal mulai.','error'); return false; }
-    const total_days = leaveCalcDays(start_date,end_date,half_day);
-    if (!total_days) { toast('Jumlah hari tidak valid.','error'); return false; }
-    const clean = v => String(v ?? '').trim() || null;
-    let payload = { employee_id, leave_type_id, start_date, end_date, total_days, reason:clean(fd.get('reason')), status:clean(fd.get('status'))||'pending', notes:clean(fd.get('notes')) };
-    const file = fd.get('leave_file');
-    if (file && file.size) {
-      if (file.size > 10*1024*1024) { toast('Ukuran dokumen maksimal 10 MB.','error'); return false; }
-      const safe = String(file.name||'dokumen').replace(/[^a-zA-Z0-9._-]+/g,'_');
-      const path = `leave/${employee_id}/${new Date().getFullYear()}/${Date.now()}-${safe}`;
-      const up = await sb.storage.from('hr-documents').upload(path,file,{upsert:false,contentType:file.type||'application/octet-stream'});
-      if (up.error) { toast('Gagal upload dokumen: '+up.error.message,'error'); return false; }
-      payload.attachment_path = path;
-    }
-    let res = existing
-      ? await sb.from('leave_requests').update(payload).eq('id',existing.id).select()
-      : await sb.from('leave_requests').insert(payload).select();
-    if (res.error && /column .* does not exist|schema cache|PGRST204/i.test(res.error.message||'')) {
-      const core = { employee_id, leave_type_id, start_date, end_date, total_days, reason:payload.reason, status:payload.status };
-      res = existing ? await sb.from('leave_requests').update(core).eq('id',existing.id).select() : await sb.from('leave_requests').insert(core).select();
-    }
-    if (res.error) { toast(friendlyError(res.error),'error'); return false; }
-    toast(existing?'Pengajuan diperbarui.':'Pengajuan cuti/izin berhasil dibuat.');
-    return true;
-  });
-  const updateDays = () => {
-    const s = modal.querySelector('[name="start_date"]')?.value;
-    const e = modal.querySelector('[name="end_date"]')?.value;
-    const h = modal.querySelector('[name="half_day"]')?.value === 'true';
-    const out = modal.querySelector('[name="total_days"]'); if(out) out.value = leaveCalcDays(s,e,h)||'';
+function p6IsHR() {
+  const r = String(state.profile?.role || '').toLowerCase();
+  return !Object.prototype.hasOwnProperty.call(state.profile || {}, 'role') || ['admin','super_admin','hr','hr_admin'].includes(r);
+}
+
+function p6Employee(id) { return state.employees.find(e => e.id === id) || null; }
+function p6LeaveType(id) { return (state.leaveTypes || []).find(x => x.id === id) || null; }
+function p6Days(a,b) {
+  if (!a || !b) return 0;
+  const x = new Date(a + 'T00:00:00'), y = new Date(b + 'T00:00:00');
+  return Math.max(0, Math.floor((y-x)/86400000)+1);
+}
+function p6StatusBadge(status) {
+  const map = {
+    pending:['badge-yellow','Menunggu'], supervisor_approved:['badge-blue','Disetujui SPV'],
+    approved:['badge-green','Disetujui'], rejected:['badge-red','Ditolak'], cancelled:['badge-red','Dibatalkan']
   };
-  ['start_date','end_date','half_day'].forEach(n=>modal.querySelector(`[name="${n}"]`)?.addEventListener('change',updateDays));
-  updateDays();
+  const [cl,label] = map[status] || ['badge-yellow', status || 'Menunggu'];
+  return `<span class="badge ${cl}">${esc(label)}</span>`;
+}
+function p6ApprovalLabel(l) {
+  if (l.status === 'rejected') return 'Ditolak';
+  if (l.status === 'approved') return 'Disetujui';
+  if (l.supervisor_status === 'approved' && l.hr_status !== 'approved') return 'Menunggu HR';
+  return 'Menunggu SPV';
+}
+function p6BalanceFor(empId, typeId, year) {
+  const type = p6LeaveType(typeId);
+  const rows = state.leave.filter(l => l.employee_id === empId && l.leave_type_id === typeId && String(l.start_date || '').slice(0,4) === String(year));
+  const approved = rows.filter(l => l.status === 'approved').reduce((s,l)=>s+Number(l.total_days||p6Days(l.start_date,l.end_date)||0),0);
+  const pending = rows.filter(l => ['pending','supervisor_approved'].includes(l.status)).reduce((s,l)=>s+Number(l.total_days||p6Days(l.start_date,l.end_date)||0),0);
+  let entitlement = 0;
+  if (type?.code === PHASE6_LEAVE.annualCode) {
+    const e = p6Employee(empId);
+    const d = e?.join_date;
+    if (d) {
+      const y = Number(year);
+      const jd = new Date(d+'T00:00:00');
+      const ref = new Date(`${y}-12-31T00:00:00`);
+      let years = ref.getFullYear()-jd.getFullYear();
+      if (ref < new Date(`${ref.getFullYear()}-${jd.getMonth()+1}-${jd.getDate()}T00:00:00`)) years--;
+      if (years >= 1 && years <= 2) entitlement=7;
+      else if (years >= 3 && years <= 4) entitlement=9;
+      else if (years >= 5 && years <= 6) entitlement=10;
+      else if (years >= 7) entitlement=12;
+    }
+  } else if (type?.quota_mode === 'fixed') entitlement = Number(type.default_quota_days||0);
+  return { entitlement, approved, pending, available: Math.max(0, entitlement-approved), afterPending: Math.max(0, entitlement-approved-pending) };
 }
 
-function leaveDashboardCards(rows) {
-  const pending=rows.filter(x=>String(x.status).toLowerCase()==='pending').length;
-  const approved=rows.filter(x=>String(x.status).toLowerCase()==='approved').length;
-  const rejected=rows.filter(x=>String(x.status).toLowerCase()==='rejected').length;
-  const today=todayJakarta();
-  const on=rows.filter(x=>String(x.status).toLowerCase()==='approved' && x.start_date<=today && x.end_date>=today).length;
-  return `<div class="cards" style="margin-bottom:14px"><div class="card"><div class="muted">Menunggu Approval</div><div class="metric">${pending}</div></div><div class="card"><div class="muted">Disetujui</div><div class="metric">${approved}</div></div><div class="card"><div class="muted">Ditolak</div><div class="metric">${rejected}</div></div><div class="card"><div class="muted">Sedang Cuti / Izin</div><div class="metric">${on}</div></div></div>`;
+async function p6RefreshLeaveData() {
+  const qs = await Promise.all([
+    sb.from('leave_types').select('*').eq('is_active',true).order('name'),
+    sb.from('leave_requests').select('*, employees(full_name,employee_number,company_id,join_date,supervisor_employee_id)').order('start_date',{ascending:false}),
+    sb.from('leave_approvals').select('*').order('decided_at',{ascending:false}),
+    sb.from('employees').select('id,full_name,employee_number,company_id,join_date,supervisor_employee_id').order('full_name')
+  ]);
+  if (qs[0].error) toast(friendlyError(qs[0].error),'error');
+  state.leaveTypes = qs[0].data || [];
+  state.leave = qs[1].data || [];
+  state.leaveApprovals = qs[2].data || [];
+  if (qs[3].data?.length) {
+    const by = new Map(qs[3].data.map(x=>[x.id,x]));
+    state.employees = state.employees.map(e => by.has(e.id) ? {...e,...by.get(e.id)} : e);
+  }
+}
+
+/* Extend existing loadAll without touching Phase 5 modules. */
+const phase6BaseLoadAll = loadAll;
+loadAll = async function() {
+  await phase6BaseLoadAll();
+  await p6RefreshLeaveData();
+};
+
+async function p6EnsureAnnual(empId, year) {
+  const r = await sb.rpc('ensure_annual_leave_balance',{p_employee:empId,p_year:Number(year)});
+  if (r.error) throw r.error;
+  return r.data;
+}
+
+function p6AttachmentPath(empId,file) {
+  const safe = String(file.name||'lampiran').replace(/[^a-zA-Z0-9._-]+/g,'_');
+  return `leave/${empId}/${new Date().getFullYear()}/${Date.now()}-${safe}`;
+}
+
+async function p6SubmitRequest(form) {
+  const fd = new FormData(form);
+  const employee_id = String(fd.get('employee_id')||'');
+  const leave_type_id = String(fd.get('leave_type_id')||'');
+  const start_date = String(fd.get('start_date')||'');
+  const end_date = String(fd.get('end_date')||start_date);
+  const reason = String(fd.get('reason')||'').trim();
+  const type = p6LeaveType(leave_type_id);
+  if (!employee_id || !leave_type_id || !start_date || !end_date || !reason) { toast('Lengkapi karyawan, jenis, tanggal dan alasan.','error'); return false; }
+  if (end_date < start_date) { toast('Tanggal berakhir tidak boleh lebih kecil dari tanggal mulai.','error'); return false; }
+  const total_days = p6Days(start_date,end_date);
+  if (type?.code === PHASE6_LEAVE.annualCode) {
+    const bal = p6BalanceFor(employee_id,leave_type_id,Number(start_date.slice(0,4)));
+    if (total_days > bal.available) { toast(`Sisa Cuti Tahunan tidak cukup. Tersedia ${bal.available} hari.`,'error'); return false; }
+  }
+  const file = fd.get('attachment');
+  let attachment_path = null;
+  if (file && file.size) {
+    if (file.size > 10*1024*1024) { toast('Lampiran maksimal 10 MB.','error'); return false; }
+    attachment_path = p6AttachmentPath(employee_id,file);
+    const up = await sb.storage.from('leave-documents').upload(attachment_path,file,{upsert:false,contentType:file.type||'application/octet-stream'});
+    if (up.error) { toast('Gagal upload lampiran: '+up.error.message,'error'); return false; }
+  }
+  const payload = {
+    employee_id, leave_type_id, start_date, end_date, total_days,
+    reason, employee_note: reason, attachment_path,
+    status:'pending', supervisor_status:'pending', hr_status:'pending', submitted_at:new Date().toISOString()
+  };
+  const r = await sb.from('leave_requests').insert(payload).select().single();
+  if (r.error) { toast(friendlyError(r.error),'error'); return false; }
+  toast('Pengajuan cuti/izin berhasil dikirim.');
+  await p6RefreshLeaveData();
+  leave();
+  return true;
+}
+
+window.p6NewLeave = function(employeeId='') {
+  const activeTypes = (state.leaveTypes||[]).filter(x=>x.is_active);
+  const empList = state.employees.filter(e=>e.employment_status==='active');
+  const body = `<div class="form-grid">
+    <div class="field field-full"><label>Karyawan *</label><select name="employee_id" required>${empList.map(e=>`<option value="${esc(e.id)}" ${e.id===employeeId?'selected':''}>${esc(e.full_name)} — ${esc(e.employee_number||'-')}</option>`).join('')}</select></div>
+    <div class="field"><label>Jenis *</label><select name="leave_type_id" id="p6Type" required>${activeTypes.map(t=>`<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('')}</select></div>
+    <div class="field"><label>Jumlah otomatis</label><input id="p6Days" value="0 hari" readonly></div>
+    <div class="field"><label>Tanggal Mulai *</label><input name="start_date" type="date" required></div>
+    <div class="field"><label>Tanggal Berakhir *</label><input name="end_date" type="date" required></div>
+    <div class="field field-full"><label>Alasan *</label><textarea name="reason" rows="4" required placeholder="Tuliskan alasan pengajuan..."></textarea></div>
+    <div class="field field-full"><label>Lampiran</label><input name="attachment" type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"><div class="muted">Wajib untuk jenis yang memerlukan bukti.</div></div>
+  </div>`;
+  const modal = openModal('Ajukan Cuti / Izin',body,async form=>{
+    const fd=new FormData(form), type=p6LeaveType(fd.get('leave_type_id')), file=fd.get('attachment');
+    if (type?.requires_attachment && (!file || !file.size)) { toast('Lampiran wajib untuk jenis pengajuan ini.','error'); return false; }
+    return await p6SubmitRequest(form);
+  },'Kirim Pengajuan');
+  const calc=()=>{ const f=new FormData(modal); const n=p6Days(f.get('start_date'),f.get('end_date')||f.get('start_date')); const el=modal.querySelector('#p6Days'); if(el) el.value=n+' hari'; };
+  modal.querySelectorAll('[name="start_date"],[name="end_date"]').forEach(x=>x.addEventListener('change',calc));
+};
+
+window.p6CancelLeave = async function(id) {
+  const r=state.leave.find(x=>x.id===id); if(!r) return;
+  if(!confirm('Batalkan pengajuan ini?')) return;
+  const q=await sb.from('leave_requests').update({status:'cancelled',supervisor_status:'cancelled',hr_status:'cancelled'}).eq('id',id);
+  if(q.error) toast(friendlyError(q.error),'error'); else { toast('Pengajuan dibatalkan.'); await p6RefreshLeaveData(); leave(); }
+};
+
+window.p6Approve = async function(id,level,decision) {
+  const r=state.leave.find(x=>x.id===id); if(!r) return;
+  if(level==='supervisor' && decision==='approved') {
+    const q=await sb.from('leave_requests').update({supervisor_status:'approved',status:'supervisor_approved',supervisor_approved_at:new Date().toISOString(),supervisor_approved_by:state.profile.id}).eq('id',id);
+    if(q.error){toast(friendlyError(q.error),'error');return;}
+    await sb.from('leave_approvals').insert({leave_request_id:id,approver_profile_id:state.profile.id,approval_level:'supervisor',decision:'approved'});
+  } else if(level==='supervisor' && decision==='rejected') {
+    const note=prompt('Catatan penolakan SPV (opsional):')||null;
+    const q=await sb.from('leave_requests').update({supervisor_status:'rejected',status:'rejected',supervisor_note:note}).eq('id',id);
+    if(q.error){toast(friendlyError(q.error),'error');return;}
+    await sb.from('leave_approvals').insert({leave_request_id:id,approver_profile_id:state.profile.id,approval_level:'supervisor',decision:'rejected',note});
+  } else if(level==='hr' && decision==='approved') {
+    const q=await sb.from('leave_requests').update({hr_status:'approved',status:'approved',hr_approved_at:new Date().toISOString(),hr_approved_by:state.profile.id}).eq('id',id);
+    if(q.error){toast(friendlyError(q.error),'error');return;}
+    await sb.from('leave_approvals').insert({leave_request_id:id,approver_profile_id:state.profile.id,approval_level:'hr',decision:'approved'});
+  } else if(level==='hr' && decision==='rejected') {
+    const note=prompt('Catatan penolakan HR (opsional):')||null;
+    const q=await sb.from('leave_requests').update({hr_status:'rejected',status:'rejected',hr_note:note}).eq('id',id);
+    if(q.error){toast(friendlyError(q.error),'error');return;}
+    await sb.from('leave_approvals').insert({leave_request_id:id,approver_profile_id:state.profile.id,approval_level:'hr',decision:'rejected',note});
+  }
+  toast(decision==='approved'?'Pengajuan disetujui.':'Pengajuan ditolak.');
+  await p6RefreshLeaveData(); leave();
+};
+
+window.p6SaveSupervisor = async function(empId,supervisorId) {
+  const q=await sb.from('employees').update({supervisor_employee_id:supervisorId||null}).eq('id',empId);
+  if(q.error){toast(friendlyError(q.error),'error');return;}
+  const e=p6Employee(empId); if(e) e.supervisor_employee_id=supervisorId||null;
+  toast('Atasan langsung tersimpan.'); leave();
+};
+
+window.p6OpenDetail = function(id) {
+  const r=state.leave.find(x=>x.id===id); if(!r) return;
+  const t=p6LeaveType(r.leave_type_id), e=p6Employee(r.employee_id), sup=e?.supervisor_employee_id?p6Employee(e.supervisor_employee_id):null;
+  const aps=(state.leaveApprovals||[]).filter(a=>a.leave_request_id===id);
+  const body=`<div class="detail-grid">
+    <div class="detail-item"><div class="muted">Karyawan</div><div><b>${esc(e?.full_name||r.employees?.full_name||'-')}</b></div></div>
+    <div class="detail-item"><div class="muted">Jenis</div><div>${esc(t?.name||'-')}</div></div>
+    <div class="detail-item"><div class="muted">Periode</div><div>${esc(fmtDate(r.start_date))} — ${esc(fmtDate(r.end_date))}</div></div>
+    <div class="detail-item"><div class="muted">Jumlah</div><div>${esc(r.total_days||p6Days(r.start_date,r.end_date))} hari</div></div>
+    <div class="detail-item"><div class="muted">SPV</div><div>${esc(sup?.full_name||'Belum diatur')}</div></div>
+    <div class="detail-item"><div class="muted">Status</div><div>${p6StatusBadge(r.status)}</div></div>
+  </div><div class="section" style="margin-top:18px"><h3 class="sub-title">Alasan</h3><div class="info-box">${esc(r.reason||r.employee_note||'-')}</div></div>
+  <div class="section"><h3 class="sub-title">Riwayat Approval</h3>${aps.length?`<div class="table-wrap"><table class="table"><thead><tr><th>Level</th><th>Keputusan</th><th>Catatan</th><th>Waktu</th></tr></thead><tbody>${aps.map(a=>`<tr><td>${esc(a.approval_level)}</td><td>${esc(a.decision)}</td><td>${esc(a.note||'-')}</td><td>${esc(new Date(a.decided_at).toLocaleString('id-ID'))}</td></tr>`).join('')}</tbody></table></div>`:'<div class="muted">Belum ada riwayat approval.</div>'}</div>`;
+  openModal('Detail Pengajuan',body,null,'Tutup');
+};
+
+function p6SupervisorSection() {
+  if (!p6IsHR()) return '';
+  const emps=state.employees.filter(e=>e.employment_status==='active');
+  return `<div class="section"><div class="section-head"><h2>Atasan Langsung</h2><span class="muted">Digunakan untuk menentukan siapa yang menerima approval SPV.</span></div>
+    <div class="table-wrap"><table class="table"><thead><tr><th>Karyawan</th><th>Perusahaan</th><th>Atasan Langsung</th><th>Aksi</th></tr></thead><tbody>${emps.map(e=>`<tr><td><b>${esc(e.full_name)}</b><div class="muted">${esc(e.employee_number||'-')}</div></td><td>${esc(e.companies?.name||'-')}</td><td><select id="p6sup_${esc(e.id)}"><option value="">— Belum diatur —</option>${emps.filter(s=>s.id!==e.id).map(s=>`<option value="${esc(s.id)}" ${e.supervisor_employee_id===s.id?'selected':''}>${esc(s.full_name)}</option>`).join('')}</select></td><td><button class="btn btn-light btn-sm" onclick="p6SaveSupervisor('${esc(e.id)}',document.getElementById('p6sup_${esc(e.id)}').value)">Simpan</button></td></tr>`).join('')}</tbody></table></div></div>`;
 }
 
 function leave() {
-  const f=state.leaveF;
-  let rows=[...state.leave];
-  const q=String(f.q||'').toLowerCase();
-  rows=rows.filter(x=>!q || [leaveEmployeeName(x.employee_id),leaveTypeName(x.leave_type_id),x.reason,x.status].join(' ').toLowerCase().includes(q));
-  if(f.type) rows=rows.filter(x=>x.leave_type_id===f.type);
-  if(f.status) rows=rows.filter(x=>String(x.status).toLowerCase()===f.status);
-  if(f.from) rows=rows.filter(x=>x.end_date>=f.from);
-  if(f.to) rows=rows.filter(x=>x.start_date<=f.to);
-  const types=state.leaveTypes.filter(isActive);
-  $('#content').innerHTML=`
-    <div class="section">
-      <div class="section-head"><div><h2>Izin & Cuti Karyawan</h2><div class="muted">Kelola pengajuan, approval, saldo dan riwayat ketidakhadiran.</div></div><div class="row-actions"><button class="btn btn-light" onclick="leaveTypesManage()">Jenis Cuti / Izin</button><button class="btn btn-primary" onclick="leaveOpenForm()">+ Pengajuan Baru</button></div></div>
-      ${leaveDashboardCards(state.leave)}
-      <div class="toolbar"><input id="leaveQ" placeholder="Cari karyawan / jenis / alasan..." value="${esc(f.q)}"><select id="leaveTypeF"><option value="">Semua jenis</option>${types.map(t=>`<option value="${esc(t.id)}" ${f.type===t.id?'selected':''}>${esc(t.name)}</option>`).join('')}</select><select id="leaveStatusF"><option value="">Semua status</option><option value="pending" ${f.status==='pending'?'selected':''}>Menunggu</option><option value="approved" ${f.status==='approved'?'selected':''}>Disetujui</option><option value="rejected" ${f.status==='rejected'?'selected':''}>Ditolak</option><option value="cancelled" ${f.status==='cancelled'?'selected':''}>Dibatalkan</option></select><input id="leaveFrom" type="date" value="${esc(f.from)}"><input id="leaveTo" type="date" value="${esc(f.to)}"></div>
-      <div class="table-wrap"><table class="table"><thead><tr><th>Karyawan</th><th>Jenis</th><th>Periode</th><th>Hari</th><th>Alasan</th><th>Status</th><th>Aksi</th></tr></thead><tbody>${rows.length?rows.map(r=>`<tr><td><b>${esc(leaveEmployeeName(r.employee_id))}</b><div class="muted">${esc(state.employees.find(e=>e.id===r.employee_id)?.employee_number||'')}</div></td><td>${esc(leaveTypeName(r.leave_type_id))}</td><td>${fmtDate(r.start_date)} - ${fmtDate(r.end_date)}</td><td>${esc(r.total_days ?? '-')}</td><td>${esc(r.reason||'-')}</td><td>${leaveStatusBadge(r.status)}</td><td><div class="row-actions">${leaveCanApprove(r)?`<button class="btn btn-light btn-sm" onclick="leaveApprove('${esc(r.id)}')">Approve</button><button class="btn btn-light btn-sm" onclick="leaveReject('${esc(r.id)}')">Reject</button>`:''}<button class="btn btn-light btn-sm" onclick="leaveOpenForm(state.leave.find(x=>x.id==='${esc(r.id)}'))">Edit</button>${String(r.status).toLowerCase()!=='cancelled'?`<button class="btn btn-light btn-sm" onclick="leaveCancel('${esc(r.id)}')">Batal</button>`:''}</div></td></tr>`).join(''):'<tr><td colspan="7"><div class="card empty">Belum ada pengajuan cuti/izin.</div></td></tr>'}</tbody></table></div>
-    </div>
-    <div class="section"><div class="section-head"><div><h2>Saldo Cuti</h2><div class="muted">Tahun ${new Date().getFullYear()}</div></div></div>${leaveBalanceTable()}</div>
-    <div class="section"><div class="section-head"><h2>Kalender Cuti / Izin</h2></div>${leaveCalendar(rows)}</div>`;
-  const bind=(id,key)=>$(id)?.addEventListener('input',e=>{f[key]=e.target.value;leave();});
-  bind('#leaveQ','q'); bind('#leaveTypeF','type'); bind('#leaveStatusF','status'); bind('#leaveFrom','from'); bind('#leaveTo','to');
+  const rows=state.leave||[];
+  const types=state.leaveTypes||[];
+  const isHR=p6IsHR();
+  const myId=state.profile?.employee_id;
+  const myPending=rows.filter(r=>r.employee_id===myId && ['pending','supervisor_approved'].includes(r.status)).length;
+  const supQueue=isHR?rows.filter(r=>r.status==='pending' && p6Employee(r.employee_id)?.supervisor_employee_id===myId).length:rows.filter(r=>r.status==='pending' && p6Employee(r.employee_id)?.supervisor_employee_id===myId).length;
+  const hrQueue=isHR?rows.filter(r=>['pending','supervisor_approved'].includes(r.status)).length:0;
+  const activeEmps=state.employees.filter(e=>e.employment_status==='active');
+  const balanceRows=activeEmps.map(e=>{const t=types.find(x=>x.code==='ANNUAL'); return t?{e,b:p6BalanceFor(e.id,t.id,new Date().getFullYear())}:null}).filter(Boolean);
+  const canApply=isHR||!!myId;
+  $('#content').innerHTML=`<div class="section">
+    <div class="section-head"><div><h2>Cuti & Izin</h2><div class="muted">Pengajuan → Approval SPV → Approval HR</div></div><div class="row-actions">${canApply?`<button class="btn btn-primary" onclick="p6NewLeave('${esc(myId||'')}')">+ Ajukan Cuti / Izin</button>`:''}</div></div>
+    <div class="cards"><div class="card"><div class="muted">Pengajuan</div><div class="metric">${rows.length}</div></div><div class="card"><div class="muted">Menunggu SPV</div><div class="metric">${supQueue}</div></div><div class="card"><div class="muted">Menunggu HR</div><div class="metric">${hrQueue}</div></div><div class="card"><div class="muted">Pengajuan Saya</div><div class="metric">${myPending}</div></div></div>
+  </div>
+  <div class="section"><div class="section-head"><h2>Saldo Cuti Tahunan</h2><span class="muted">Tahun ${new Date().getFullYear()}</span></div>
+    ${balanceRows.length?`<div class="table-wrap"><table class="table"><thead><tr><th>Karyawan</th><th>Hak</th><th>Terpakai</th><th>Menunggu</th><th>Sisa</th><th>Sisa setelah pengajuan</th></tr></thead><tbody>${balanceRows.map(x=>`<tr><td><b>${esc(x.e.full_name)}</b><div class="muted">${esc(x.e.employee_number||'-')}</div></td><td>${x.b.entitlement}</td><td>${x.b.approved}</td><td>${x.b.pending}</td><td><b>${x.b.available}</b></td><td>${x.b.afterPending}</td></tr>`).join('')}</tbody></table></div>`:'<div class="card empty">Belum ada karyawan aktif.</div>'}
+  </div>
+  ${p6SupervisorSection()}
+  <div class="section"><div class="section-head"><h2>Pengajuan Cuti / Izin</h2></div>${rows.length?`<div class="table-wrap"><table class="table"><thead><tr><th>Karyawan</th><th>Jenis</th><th>Periode</th><th>Hari</th><th>Status</th><th>Aksi</th></tr></thead><tbody>${rows.map(r=>{const e=p6Employee(r.employee_id),t=p6LeaveType(r.leave_type_id); const mine=r.employee_id===myId; const sup=e?.supervisor_employee_id===myId; const canSup=sup&&r.status==='pending'; const canHr=isHR&&['pending','supervisor_approved'].includes(r.status); return `<tr><td><b>${esc(e?.full_name||r.employees?.full_name||'-')}</b><div class="muted">${esc(e?.employee_number||'')}</div></td><td>${esc(t?.name||'-')}</td><td>${fmtDate(r.start_date)} — ${fmtDate(r.end_date)}</td><td>${esc(r.total_days||p6Days(r.start_date,r.end_date))}</td><td>${p6StatusBadge(r.status)}</td><td><div class="row-actions"><button class="btn btn-light btn-sm" onclick="p6OpenDetail('${esc(r.id)}')">Detail</button>${canSup?`<button class="btn btn-primary btn-sm" onclick="p6Approve('${esc(r.id)}','supervisor','approved')">Setujui SPV</button><button class="btn btn-light btn-sm" onclick="p6Approve('${esc(r.id)}','supervisor','rejected')">Tolak</button>`:''}${canHr?`<button class="btn btn-primary btn-sm" onclick="p6Approve('${esc(r.id)}','hr','approved')">Approve HR</button><button class="btn btn-light btn-sm" onclick="p6Approve('${esc(r.id)}','hr','rejected')">Tolak HR</button>`:''}${mine&&['pending','supervisor_approved'].includes(r.status)?`<button class="btn btn-light btn-sm" onclick="p6CancelLeave('${esc(r.id)}')">Batalkan</button>`:''}</div></td></tr>`;}).join('')}</tbody></table></div>`:'<div class="card empty">Belum ada pengajuan cuti/izin.</div>'}</div>`;
 }
 
-function leaveBalanceTable(){
-  const year=new Date().getFullYear(); const types=state.leaveTypes.filter(isActive).filter(t=>Number(t.quota_days||0)>0);
-  if(!types.length) return '<div class="card empty">Belum ada jenis cuti berkuota atau saldo yang disiapkan.</div>';
-  const rows=state.employees.filter(e=>e.employment_status!=='inactive').slice(0,300);
-  return `<div class="table-wrap"><table class="table"><thead><tr><th>Karyawan</th>${types.map(t=>`<th>${esc(t.name)}</th>`).join('')}</tr></thead><tbody>${rows.map(e=>`<tr><td><b>${esc(e.full_name)}</b><div class="muted">${esc(e.employee_number||'')}</div></td>${types.map(t=>`<td>${leaveQuotaFor(e.id,t.id,year)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
-}
+console.log('HR Employee System Phase 6 loaded: Cuti & Izin + Approval SPV/HR');
 
-function leaveCalendar(rows){
-  const year=new Date().getFullYear(), month=new Date().getMonth();
-  const first=new Date(year,month,1), days=new Date(year,month+1,0).getDate(), start=(first.getDay()+6)%7;
-  let cells=''; for(let i=0;i<start;i++) cells+='<div class="card" style="min-height:80px;opacity:.35"></div>';
-  for(let d=1;d<=days;d++){
-    const iso=`${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-    const list=rows.filter(r=>String(r.status).toLowerCase()==='approved'&&r.start_date<=iso&&r.end_date>=iso).slice(0,4);
-    cells+=`<div class="card" style="min-height:80px"><b>${d}</b>${list.map(r=>`<div class="muted" style="margin-top:5px">${esc(leaveEmployeeName(r.employee_id))} · ${esc(leaveTypeName(r.leave_type_id))}</div>`).join('')}</div>`;
+
+/* =========================================================
+   PHASE 6B — SUPERVISOR FIELD IN EDIT EMPLOYEE
+   Tempelkan di PALING BAWAH app.js
+   ========================================================= */
+
+window.employeeEditForm = function(id) {
+  const e = state.employees.find(x => x.id === id);
+  if (!e) {
+    toast('Data karyawan tidak ditemukan.', 'error');
+    return;
   }
-  return `<div style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px"><div class="muted">Sen</div><div class="muted">Sel</div><div class="muted">Rab</div><div class="muted">Kam</div><div class="muted">Jum</div><div class="muted">Sab</div><div class="muted">Min</div>${cells}</div>`;
-}
 
-function leaveTypesManage(){
-  const rows=state.leaveTypes;
-  const body=`<div class="table-wrap"><table class="table"><thead><tr><th>Kode</th><th>Nama</th><th>Kategori</th><th>Kuota</th><th>Lampiran</th><th>Approval</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${esc(r.code||'-')}</td><td><b>${esc(r.name||'-')}</b></td><td>${esc(r.category||'-')}</td><td>${esc(r.quota_days??'-')}</td><td>${r.requires_attachment?'Ya':'Tidak'}</td><td>${r.requires_approval===false?'Tidak':'Ya'}</td></tr>`).join('')||'<tr><td colspan="6">Belum ada jenis.</td></tr>'}</tbody></table></div><div class="info-box" style="margin-top:12px">Jenis cuti/izin dikelola dari database Phase 6. Jika ingin menambah atau mengubah jenis, gunakan SQL master data agar struktur tetap konsisten.</div>`;
-  openModal('Jenis Cuti / Izin',body,async()=>true,'Tutup');
-}
+  const activeEmployees = state.employees
+    .filter(x => x.id !== id && x.employment_status !== 'inactive')
+    .sort((a,b) => String(a.full_name || '').localeCompare(String(b.full_name || '')));
+
+  const companyOptions = (state.companies || [])
+    .filter(c => isActive(c) || c.id === e.company_id)
+    .map(c => `<option value="${esc(c.id)}" ${c.id === e.company_id ? 'selected' : ''}>${esc(c.name)}</option>`)
+    .join('');
+
+  const supervisorOptions = activeEmployees
+    .map(x => `<option value="${esc(x.id)}" ${x.id === e.supervisor_employee_id ? 'selected' : ''}>
+      ${esc(x.full_name || '-')} — ${esc(x.employee_number || '-')}
+    </option>`)
+    .join('');
+
+  const body = `
+    <div class="modal-grid">
+
+      <div class="field">
+        <label>ID Karyawan *</label>
+        <input name="employee_number" required value="${esc(e.employee_number || '')}">
+      </div>
+
+      <div class="field">
+        <label>Nama Lengkap *</label>
+        <input name="full_name" required value="${esc(e.full_name || '')}">
+      </div>
+
+      <div class="field">
+        <label>NIK</label>
+        <input name="nik" inputmode="numeric" value="${esc(e.nik || '')}">
+      </div>
+
+      <div class="field">
+        <label>Email</label>
+        <input name="email" type="email" value="${esc(e.email || '')}">
+      </div>
+
+      <div class="field">
+        <label>No. HP</label>
+        <input name="phone" type="tel" value="${esc(e.phone || '')}">
+      </div>
+
+      <div class="field">
+        <label>Tanggal Masuk *</label>
+        <input name="join_date" type="date" required value="${esc(e.join_date || '')}">
+      </div>
+
+      <div class="field">
+        <label>Perusahaan *</label>
+        <select name="company_id" required>
+          <option value="">Pilih perusahaan</option>
+          ${companyOptions}
+        </select>
+      </div>
+
+      <div class="field">
+        <label>Departemen</label>
+        <select name="department_id"></select>
+      </div>
+
+      <div class="field">
+        <label>Jabatan</label>
+        <select name="position_id"></select>
+      </div>
+
+      <div class="field">
+        <label>Status</label>
+        <select name="employment_status">
+          <option value="active" ${e.employment_status === 'active' ? 'selected' : ''}>Aktif</option>
+          <option value="inactive" ${e.employment_status === 'inactive' ? 'selected' : ''}>Tidak Aktif</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label>Tipe</label>
+        <select name="employment_type">
+          <option value="permanent" ${e.employment_type === 'permanent' ? 'selected' : ''}>Tetap</option>
+          <option value="contract" ${e.employment_type === 'contract' ? 'selected' : ''}>Kontrak</option>
+          <option value="intern" ${e.employment_type === 'intern' ? 'selected' : ''}>Intern</option>
+          <option value="part_time" ${e.employment_type === 'part_time' ? 'selected' : ''}>Part Time</option>
+          <option value="daily" ${e.employment_type === 'daily' ? 'selected' : ''}>Harian</option>
+        </select>
+      </div>
+
+      <div class="field field-full">
+        <label>Supervisor / Atasan Langsung</label>
+        <select name="supervisor_employee_id">
+          <option value="">Belum ditentukan</option>
+          ${supervisorOptions}
+        </select>
+        <div class="muted" style="margin-top:6px">
+          Pilih karyawan yang menjadi SPV/atasan langsung.
+          Karyawan tidak dapat dipilih sebagai supervisor untuk dirinya sendiri.
+        </div>
+      </div>
+
+      <div class="field field-full">
+        <div class="muted">
+          Lokasi/outlet tidak diedit di sini. Gunakan <b>Riwayat Penempatan</b>
+          agar setiap mutasi tetap tercatat.
+        </div>
+      </div>
+
+    </div>
+  `;
+
+  const modal = openModal(
+    'Edit Data Karyawan',
+    body,
+    async form => {
+      const fd = new FormData(form);
+
+      const employee_number = String(fd.get('employee_number') || '').trim();
+      const full_name = String(fd.get('full_name') || '').trim();
+      const join_date = fd.get('join_date') || '';
+      const company_id = fd.get('company_id') || null;
+      const supervisor_employee_id =
+        String(fd.get('supervisor_employee_id') || '').trim() || null;
+
+      if (!employee_number || !full_name || !join_date || !company_id) {
+        toast('Lengkapi field bertanda *.', 'error');
+        return false;
+      }
+
+      if (supervisor_employee_id === id) {
+        toast('Karyawan tidak dapat menjadi supervisor dirinya sendiri.', 'error');
+        return false;
+      }
+
+      const dup = state.employees.find(
+        x => x.id !== id &&
+        String(x.employee_number || '').toLowerCase() === employee_number.toLowerCase()
+      );
+
+      if (dup) {
+        toast(`ID Karyawan "${employee_number}" sudah dipakai oleh ${dup.full_name}.`, 'error');
+        return false;
+      }
+
+      const payload = {
+        employee_number,
+        full_name,
+        nik: String(fd.get('nik') || '').trim() || null,
+        email: String(fd.get('email') || '').trim() || null,
+        phone: String(fd.get('phone') || '').trim() || null,
+        join_date,
+        company_id,
+        department_id: fd.get('department_id') || null,
+        position_id: fd.get('position_id') || null,
+        employment_status: fd.get('employment_status') || 'active',
+        employment_type: fd.get('employment_type') || null,
+        supervisor_employee_id
+      };
+
+      const res = await sb
+        .from('employees')
+        .update(payload)
+        .eq('id', id)
+        .select();
+
+      if (res.error) {
+        toast(friendlyError(res.error), 'error');
+        return false;
+      }
+
+      if (!res.data || !res.data.length) {
+        toast(PERMISSION_MSG, 'error');
+        return false;
+      }
+
+      const local = state.employees.find(x => x.id === id);
+      if (local) {
+        Object.assign(local, payload);
+      }
+
+      toast(
+        `Data karyawan "${full_name}" berhasil diperbarui` +
+        (supervisor_employee_id ? ' dan SPV berhasil disimpan.' : '.')
+      );
+
+      return true;
+    },
+    'Simpan',
+    () => showEmployeeDetail(id)
+  );
+
+  const sel = n => modal.querySelector(`[name="${n}"]`);
+
+  const fill = (name, items, placeholder, current) => {
+    const el = sel(name);
+    if (!el) return;
+
+    el.innerHTML =
+      `<option value="">${placeholder}</option>` +
+      items.map(x =>
+        `<option value="${esc(x.id)}" ${current === x.id ? 'selected' : ''}>
+          ${esc(x.name)}${isActive(x) ? '' : ' (nonaktif)'}
+        </option>`
+      ).join('');
+  };
+
+  const refresh = () => {
+    const employeeId = sel('company_id').value;
+
+    const depts = (state.departments || []).filter(d =>
+      isActive(d) &&
+      (d.company_id === employeeId || !d.company_id)
+    );
+
+    const poss = (state.positions || []).filter(p =>
+      isActive(p) &&
+      (p.company_id === employeeId || !p.company_id)
+    );
+
+    fill(
+      'department_id',
+      depts,
+      employeeId ? 'Pilih departemen' : 'Pilih perusahaan dulu',
+      e.department_id
+    );
+
+    fill(
+      'position_id',
+      poss,
+      employeeId ? 'Pilih jabatan' : 'Pilih perusahaan dulu',
+      e.position_id
+    );
+
+    sel('department_id').disabled = !employeeId;
+    sel('position_id').disabled = !employeeId;
+  };
+
+  sel('company_id').onchange = refresh;
+  refresh();
+};
+
+console.log('HR Employee System Phase 6B loaded: Supervisor field in Employee Edit');
