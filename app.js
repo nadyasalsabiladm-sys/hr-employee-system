@@ -1855,19 +1855,11 @@ function cgCollectFormData(form) {
     representative: String(fd.get('cg_rep') || '').trim(),
     representativeTitle: String(fd.get('cg_rep_title') || '').trim(),
     companyAddress: String(fd.get('cg_company_address') || '').trim(),
-    notes: String(fd.get('cg_notes') || '').trim(),
-    statusText: String(fd.get('cg_status_text') || '').trim(),
-    birthInfo: String(fd.get('cg_birth_info') || '').trim(),
-    gender: String(fd.get('cg_gender') || '').trim(),
-    previousContractNumber: String(fd.get('cg_previous_contract_number') || '').trim(),
-    previousStartDate: fd.get('cg_previous_start_date') || '',
-    previousEndDate: fd.get('cg_previous_end_date') || '',
-    amendmentLabel: String(fd.get('cg_number') || '').trim().split(' - ')[0] || 'AMANDemen I'
+    notes: String(fd.get('cg_notes') || '').trim()
   };
 }
 
 function cgOfferingHtml(d) {
-  const status = d.statusText || 'Probation - 3 Bulan';
   return `
     <div class="cg-doc">
       <h1>SURAT PENAWARAN - OFFERING LETTER</h1>
@@ -1878,37 +1870,33 @@ function cgOfferingHtml(d) {
 
       <p>Thank you for your interest to be part of our existing team at
       <b>${cgEsc(d.company)}</b>. We are pleased to offer you an employment
-      with us. The terms are as follow: / Terima kasih atas minat Anda untuk
-      menjadi bagian dari tim kami di <b>CV. Zayco Boga Alifa & It’s My Cake</b>.
-      Dengan senang hati kami menawarkan Anda pekerjaan bersama kami dengan
-      ketentuan sebagai berikut:</p>
+      with us. The terms are as follow:</p>
 
       <table>
         <tr><td>Posisi</td><td>${cgEsc(d.position)}</td></tr>
         <tr><td>Department</td><td>${cgEsc(d.department)}</td></tr>
         <tr><td>Melapor Kepada</td><td>${cgEsc(d.supervisor)}</td></tr>
         <tr><td>Tanggal bergabung</td><td>${cgDate(d.joinDate)}</td></tr>
-        <tr><td>Status Karyawan</td><td>${cgEsc(status)}</td></tr>
+        <tr><td>Status Karyawan</td><td>${d.type === 'offering_letter' ? 'Probation' : cgTypeLabel(d.type)}</td></tr>
         <tr><td>Lokasi Kerja</td><td>${cgEsc(d.location)}</td></tr>
         <tr><td>Hari dan Jam Kerja</td><td>${cgEsc(d.workDays)}</td></tr>
         <tr><td>Kompensasi</td><td>${cgMoney(d.baseSalary)}</td></tr>
-        <tr><td>Insentif</td><td>${d.performance ? cgMoney(d.performance) : '-'}</td></tr>
-        <tr><td>Festive Allowance (THR)</td><td>${d.thr ? cgMoney(d.thr) : '-'}</td></tr>
+        <tr><td>Insentif</td><td>${cgMoney(d.performance)}</td></tr>
+        <tr><td>Festive Allowance (THR)</td><td>${cgMoney(d.thr)}</td></tr>
       </table>
 
-      <p>Perusahaan memberikan THR kepada Karyawan sebanyak 1 (satu) bulan
-      gaji kepada Karyawan yang telah mencapai 12 bulan masa kerja atau secara
-      prorata jika Karyawan belum mencapai masa kerja 12 bulan pada Hari Raya
-      dengan minimal 1 bulan bekerja.</p>
+      <p>Perusahaan memberikan THR kepada Karyawan sebanyak 1 (satu)
+      bulan gaji kepada Karyawan yang telah mencapai 12 bulan masa kerja
+      atau secara prorata jika Karyawan belum mencapai masa kerja 12 bulan
+      pada Hari Raya dengan minimal 1 bulan bekerja.</p>
 
-      <p>Should the above terms be acceptable to you, please sign a copy of this
-      letter and return one copy to HRD. / Apabila Anda setuju dengan ketentuan
-      tersebut diatas, mohon untuk menandatangani surat ini dan mengirimkan satu
-      salinan ke HRD.</p>
+      <p>Should the above terms be acceptable to you, please sign a copy
+      of this letter and return one copy to HRD.</p>
 
       <div class="sign">
-        <div>${cgEsc(d.company)}<br>Menyetujui,<br><br>${cgEsc(d.representative)}<br>${cgEsc(d.representativeTitle)}</div>
-        <div>Karyawan<br><br><br>${cgEsc(d.employee?.full_name || '')}</div>
+        <div>${cgEsc(d.company)}<br>Menyetujui,</div>
+        <div>${cgEsc(d.representative)}<br>${cgEsc(d.representativeTitle)}</div>
+        <div>Karyawan<br><br>${cgEsc(d.employee?.full_name || '')}</div>
       </div>
     </div>`;
 }
@@ -1916,7 +1904,6 @@ function cgOfferingHtml(d) {
 function cgPkwtHtml(d) {
   const companyAddress = d.companyAddress ||
     'Jl. Arco Raya No. 24, RT.004/001 Cipete Selatan, Cilandak, Jakarta Selatan';
-  const previousText = d.previousContractNumber ? ` No. ${cgEsc(d.previousContractNumber)}` : '';
 
   return `
     <div class="cg-doc">
@@ -1924,47 +1911,47 @@ function cgPkwtHtml(d) {
       <p class="center">No: ${cgEsc(d.number || '[NOMOR DOKUMEN]')}</p>
 
       <p>Pada hari ini tanggal <b>${cgDate(d.signedDate)}</b> telah disepakati
-      Perjanjian Kerja Waktu Tertentu (PKWT) antara CV. Zayco Boga Alifa,
-      sebuah usaha mikro kecil dan menengah di ${cgEsc(companyAddress)}
+      Perjanjian Kerja Waktu Tertentu (PKWT) antara
+      <b>${cgEsc(d.company)}</b>, di ${cgEsc(companyAddress)},
       dalam hal ini diwakili oleh:</p>
 
       <p>1. Nama : ${cgEsc(d.representative)}<br>
       Jabatan : ${cgEsc(d.representativeTitle)}<br>
-      Bertindak untuk dan atas nama CV Zayco Boga Alifa untuk selanjutnya dalam
-      hal ini disebut sebagai : <b>PIHAK PERTAMA (“Perusahaan”)</b></p>
+      Bertindak untuk dan atas nama ${cgEsc(d.company)}, untuk selanjutnya
+      disebut sebagai PIHAK PERTAMA (“Perusahaan”).</p>
 
       <p>2. Nama : ${cgEsc(d.employee?.full_name || '')}<br>
-      Tempat &amp; Tgl. Lahir : ${cgEsc(d.birthInfo || '-')}<br>
-      Alamat Tempat Tinggal : ${cgEsc(d.employee?.address || '-')}<br>
+      ID Karyawan : ${cgEsc(d.employee?.employee_number || '-') }<br>
+      Alamat : ${cgEsc(d.employee?.address || '-')}<br>
       Dalam hal ini bertindak untuk dan atas namanya sendiri dan selanjutnya
-      disebut sebagai : <b>PIHAK KEDUA (“Karyawan”)</b></p>
+      disebut sebagai PIHAK KEDUA (“Karyawan”).</p>
 
-      <p><b>PIHAK PERTAMA DAN PIHAK KEDUA</b> sepakat untuk membuat Perjanjian
-      Kerja Waktu Tertentu ini untuk jangka waktu yang sebagaimana tertera pada
-      pasal 2 (dua).</p>
+      <p>PIHAK PERTAMA DAN PIHAK KEDUA sepakat untuk membuat Perjanjian
+      Kerja Waktu Tertentu ini untuk jangka waktu sebagaimana tertera pada
+      Pasal 2 (dua).</p>
 
       <h2>PASAL 1 — Jabatan, Jenis Pekerjaan dan Tanggung Jawab</h2>
       <p>PIHAK KEDUA sebagai <b>${cgEsc(d.position)}</b> pada department
       <b>${cgEsc(d.department)}</b>, dengan tugas dan tanggung jawab sesuai
       Job Description atau tugas-tugas yang ditentukan dan diperintahkan oleh
-      atasan langsung. Dalam menjalankan tugasnya PIHAK KEDUA bertanggung jawab
-      kepada (Direktur dan atau Head division).</p>
+      atasan langsung. Dalam menjalankan tugasnya PIHAK KEDUA bertanggung
+      jawab kepada atasan langsung.</p>
 
       <h2>PASAL 2 — Masa Kerja</h2>
       <p>Perjanjian Kerja Waktu Tertentu ini berlaku terhitung mulai
       <b>${cgDate(d.startDate)}</b> dan hubungan kerja antara PIHAK PERTAMA
-      dengan PIHAK KEDUA akan berakhir secara hukum pada tanggal
+      dengan PIHAK KEDUA akan berakhir pada tanggal
       <b>${cgDate(d.endDate)}</b>.</p>
 
       <h2>PASAL 3 — Tempat Pekerjaan</h2>
-      <p>PIHAK KEDUA akan ditempatkan di <b>${cgEsc(d.location)}</b> yang
-      berlokasi di ${cgEsc(companyAddress)}, Namun demikian, PIHAK KEDUA
-      bersedia untuk melakukan perjalanan dinas bilamana diperlukan sesuai
-      kebutuhan pekerjaan sesuai perintah PIHAK PERTAMA.</p>
+      <p>PIHAK KEDUA akan ditempatkan di <b>${cgEsc(d.location)}</b>.
+      Namun demikian, PIHAK KEDUA bersedia melakukan perjalanan dinas bila
+      diperlukan sesuai kebutuhan pekerjaan dan perintah PIHAK PERTAMA.</p>
 
       <h2>PASAL 4 — Penggajian</h2>
       <p>Pembayaran upah atau penggajian akan diberikan oleh PIHAK PERTAMA
-      kepada PIHAK KEDUA dilaksanakan di Akhir bulan.</p>
+      kepada PIHAK KEDUA dilaksanakan pada akhir bulan.</p>
+
       <p><b>Rincian remunerasi:</b></p>
       <table>
         <tr><td>Gaji Pokok</td><td>${cgMoney(d.baseSalary)}</td></tr>
@@ -1978,129 +1965,47 @@ function cgPkwtHtml(d) {
       <h2>PASAL 5 — Waktu Kerja</h2>
       <p>Jam kerja resmi ditentukan sebagai berikut:</p>
       <ol>
-        <li>Senin s/d Jumat : dari jam 08.00 s/d 17.00.</li>
-        <li>Sabtu : dari jam 08.00 s/d 15:00 waktu setempat.</li>
-        <li>Istirahat makan siang adalah satu jam dari jam 12.00 s/d 13.00 waktu setempat.</li>
-        <li>Keterlambatan 08:01 dan denda maksimal potongan Rp. 20.000 pada salary.</li>
+        <li>Senin s/d Jumat: 08.00 s/d 17.00.</li>
+        <li>Sabtu: 08.00 s/d 15.00 waktu setempat.</li>
+        <li>Istirahat makan siang satu jam, 12.00 s/d 13.00.</li>
+        <li>Keterlambatan mengikuti ketentuan perusahaan yang berlaku.</li>
       </ol>
 
       <h2>PASAL 6 — Kewajiban PIHAK KEDUA</h2>
       <ol>
-        <li>PIHAK KEDUA wajib melaksanakan tugas, tanggung jawab yang dibebankan
-        oleh atasan dengan sebaik-baiknya, jujur, disiplin dan penuh tanggung jawab.</li>
-        <li>PIHAK KEDUA wajib mentaati setiap peraturan-peraturan yang dikeluarkan
-        oleh PIHAK PERTAMA dan/atau atasan baik lisan maupun tertulis.</li>
-        <li>PIHAK KEDUA wajib merahasiakan semua keterangan-keterangan yang
-        diperolehnya selama bekerja dan tidak boleh memberikan keterangan-keterangan
-        tersebut kepada pihak lain tanpa persetujuan terlebih dahulu dari PIHAK PERTAMA.</li>
-        <li>PIHAK KEDUA wajib mengembalikan semua dokumen-dokumen, peralatan-peralatan
-        kerja yang diberikan kepadanya selama bekerja pada akhir Perjanjian Kerja ini.</li>
-        <li>PIHAK KEDUA wajib datang tepat waktu sesuai dengan aturan jam kerja yang
-        tertuang dalam pasal 5. Apabila PIHAK KEDUA datang diatas waktu yang ditentukan
-        maka akan ada sangsi yang berlaku.</li>
+        <li>Melaksanakan tugas dan tanggung jawab dengan sebaik-baiknya,
+        jujur, disiplin dan penuh tanggung jawab.</li>
+        <li>Mentaati setiap peraturan yang dikeluarkan PIHAK PERTAMA
+        dan/atau atasan.</li>
+        <li>Merahasiakan keterangan yang diperoleh selama bekerja.</li>
+        <li>Mengembalikan dokumen dan peralatan kerja pada akhir perjanjian.</li>
       </ol>
 
-      <h2>PASAL 7 — Izin, Cuti &amp; Tanpa Keterangan</h2>
-      <p>PIHAK KEDUA yang berhak mendapatkan cuti apabila sudah menjalani masa
-      kerja salam 12 bulan terhitung dari tanggal awal kontrak di perusahaan.</p>
-      <p>PIHAK KEDUA wajib memberikan informasi apabila berhalangan hadir dalam
-      kerja. Jika izin karena sakit maka wajib melampirkan surat keterangan sakit
-      dari dokter dan tidak mengurangi hak dari karyawan.</p>
-      <p>Apabila PIHAK KEDUA tidak hadir tanpa keterangan maka akan diberikan
-      sangsi berupa pemotongan upah sesuai dengan ketentuan perusahaan.</p>
-      <p><b>Ketentuan Hak cuti untuk PIHAK KEDUA ialah:</b></p>
-      <ol type="a">
-        <li>Masa kerja 1 tahun : 7 hari</li>
-        <li>Masa kerja 3 tahun : 9 hari</li>
-        <li>Masa Kerja 5 tahun : 10 hari</li>
-        <li>Masa kerja 6 tahun keatas: 12 hari</li>
-      </ol>
-      <p><b>Larangan – Larangan</b></p>
-      <p>PIHAK KEDUA dilarang melakukan perbuatan-perbuatan/tindakan-tindakan
-      yang bertentangan dengan peraturan-peraturan tata tertib, dan ketentuan-ketentuan
-      serta norma-norma yang berlaku baik dalam perusahaan maupun dalam Peraturan
-      dan Undang-Undang Ketenagakerjaan serta Hukum Negara Republik Indonesia.</p>
-      <p><b>Seragam</b></p>
-      <p>PIHAK KEDUA wajib menggunakan seragam kerja sesuai dengan harinya seperti:</p>
-      <ol type="a">
-        <li>Senin-Selasa : Kemeja Zayco (warna Hijau keabu-abuan)</li>
-        <li>Rabu-Kamis : Pria - Polo Shirt Zayco (Warna Navy); Wanita – Kemeja Zayco (Navy)</li>
-        <li>Jum’at : Batik</li>
-        <li>Sabtu : Bebas Sopan (Pria dilarang menggunakan Kaos Oblong)</li>
-      </ol>
-      <p>Seragam yang disediakan oleh PIHAK PERTAMA merupakan asset perusahaan
-      dan bukan menjadi kepemilikan PIHAK KEDUA. Apabila hubungan kerja berakhir
-      maka PIHAK KEDUA wajib mengembalikan kepada PIHAK PERTAMA.</p>
+      <h2>PASAL 7 — Izin, Cuti & Tanpa Keterangan</h2>
+      <p>Ketentuan izin, cuti, sakit dan ketidakhadiran mengikuti ketentuan
+      perusahaan yang berlaku.</p>
 
       <h2>PASAL 8 — Tindakan Disiplin</h2>
-      <p>PIHAK PERTAMA akan mengenakan sanksi disiplin terhadap PIHAK KEDUA yang
-      melakukan pelanggaran-pelanggaran terhadap tata tertib kerja dan peraturan-peraturan
-      PIHAK PERTAMA, sesuai dengan Undang-undang, Ketentuan-ketentuan dan
-      peraturan-peraturan ketenagakerjaan yang berlaku.</p>
-      <ol type="a">
-        <li>Apabila PIHAK KEDUA melakukan tindakan indisipliner seperti tidak masuk
-        bekerja, tidak tercapainya target pekerjaan, malas. PIHAK PERTAMA akan
-        melakukan SURAT PERINGATAN I dengan dilakukannya pemantauan selama 1 bulan
-        dan berlaku 3 bulan pada saat surat itu diterbitkan.</li>
-        <li>Jika PIHAK KEDUA mengulangi kesalahan yang sama maka akan dinaikan
-        menjadi SURAT PERINGATAN II dengan ketentuan yang akan mempengaruhi
-        pendapatan dan kesepakatan antara PIHAK PERTAMA &amp; PIHAK KEDUA.</li>
-        <li>Jika PIHAK KEDUA mengulangi kesalahan yang sama maka akan dinaikan
-        menjadi SURAT PERINGATAN III yang mana berakhirnya kesepakatan ini tanpa
-        adanya kewajiban PIHAK PERTAMA untuk membayar kompensasi apapun.</li>
-      </ol>
-      <p>PIHAK PERTAMA berhak mengeluarkan SURAT PERINGATAN I &amp; TERAKHIR
-      apabila PIHAK KEDUA melakukan tindakan yang tidak bisa ditoleransi atau fatal.</p>
+      <p>PIHAK PERTAMA akan mengenakan sanksi disiplin terhadap PIHAK KEDUA
+      yang melakukan pelanggaran terhadap tata tertib kerja dan peraturan
+      PIHAK PERTAMA sesuai ketentuan yang berlaku.</p>
 
-      <h2>PASAL 9 — Berakhirnya Hubungan Kerja &amp; Pemutusan Hubungan Kerja</h2>
-      <ol>
-        <li>PIHAK KEDUA tidak mampu melaksanakan tugas dan tanggung jawab yang
-        dibebankan sesuai job description/putus demi hukum/karena berakhirnya
-        perjanjian dalam hal ini PIHAK PERTAMA tidak wajib membayar apapun atau sisa masa kontrak.</li>
-        <li>PIHAK KEDUA apabila ingin mengundurkan diri pada masa kontrak yang masih
-        berjalan maka harus membuat surat pengunduran diri dan diberikan kepada
-        PIHAK PERTAMA selambat-lambatnya N-1 (30 Hari sebelum pengunduran diri).</li>
-        <li>Perbuatan atau tindakan PIHAK KEDUA yang merupakan kesalahan berat,
-        melanggar Undang-Undang Ketenagakerjaan/Peraturan Ketenagakerjaan yang
-        berlaku, ketentuan Peraturan PIHAK PERTAMA serta perintah atasan baik lisan
-        maupun tulisan.</li>
-      </ol>
-      <p><b>Yang termasuk tindakan kesalahan berat itu adalah sebagai berikut:</b></p>
-      <ol type="a">
-        <li>Mencuri, menggelapkan, menipu atau melakukan kejahatan lainnya, baik yang menyangkut kepentingan Perusahaan maupun pihak lain.</li>
-        <li>Memberikan keterangan palsu atau dipalsukan kepada Perusahaan yang dijadikan dasar oleh Perusahaan dalam membuat Perjanjian Kerja ini.</li>
-        <li>Memberikan keterangan palsu atau dipalsukan kepada sehingga merugikan Perusahaan atau kepentingan negara.</li>
-        <li>Mabuk, minum minuman keras yang memabukkan, madat, memakai obat bius atau menyalahgunakan obat-obat terlarang ataupun obat perangsang lainnya yang dilarang oleh peraturan perundang-undangan, ditempat kerja, dan ditempat-tempat yang ditetapkan Pihak PERTAMA.</li>
-        <li>Melakukan perbuatan asusila atau melakukan perjudian ditempat kerja.</li>
-        <li>Menyerang, mengintimidasi atau menipu pengusaha atau teman sekerja dan memperdagangkan barang terlarang baik dalam lingkungan kerja maupun di luar lingkungan kerja.</li>
-        <li>Menganiaya, mengancam secara fisik dan mental, menghina secara kasar pimpinan atau pegawai perusahaan.</li>
-        <li>Membujuk pimpinan, teman sekerja atau pegawai perusahaan untuk melakukan sesuatu yang bertentangan dengan hukum atau kesusilaan serta perundangan yang berlaku.</li>
-        <li>Membongkar atau membocorkan rahasia perusahaan atau mencemarkan nama baik perusahaan yang seharusnya dirahasiakan kecuali untuk kepentingan negara atau dengan sengaja atau kecerobohannya merusak atau membiarkan barang-barang atau dokumen-dokumen milik atau yang berada dalam pengusaan perusahaan sehingga terancam bahaya.</li>
-        <li>Dengan sengaja walaupun sudah diperingatkan membiarkan dirinya atau teman sekerjanya dalam keadaan bahaya.</li>
-        <li>Hal-hal lain yang diatur dalam peraturan perusahaan.</li>
-        <li>Apabila PIHAK KEDUA sebelum bergabung di perusahaan PIHAK PERTAMA memiliki sangkutan, sengketa, penipuan, dan atau hal-hal yang bertentangan dengan Undang-undang (Miras, kekerasan, dan atau lainnya.), Maka akan diserahkan kepada pihak yang berwajib dan PIHAK PERTAMA berhak memutus hubungan kerja tanpa ada kompensasi apapun.</li>
-      </ol>
-      <p>Dalam hal tersebut di atas PIHAK PERTAMA tidak berkewajiban untuk membayar
-      uang kompensasi atau pembayaran lainnya kecuali gaji sampai pada saat pemutusan hubungan kerja.</p>
+      <h2>PASAL 9 — Berakhirnya Hubungan Kerja & PHK</h2>
+      <p>Hubungan kerja dapat berakhir karena berakhirnya masa perjanjian,
+      pengunduran diri, atau keadaan lain sesuai ketentuan perjanjian dan
+      peraturan yang berlaku.</p>
 
       <h2>PASAL 10 — Penyelesaian Perselisihan</h2>
-      <p>Bila terjadi perselisihan dalam pelaksanaan isi perjanjian kerja ini maka
-      kedua belah pihak berusaha menyelesaikannya melalui musyawarah dan bila tidak
-      tercapai kesepakatan maka akan diselesaikan sesuai ketentuan peraturan perundangan
-      yang berlaku.</p>
+      <p>Bila terjadi perselisihan, kedua belah pihak berusaha menyelesaikan
+      melalui musyawarah dan bila tidak tercapai kesepakatan maka diselesaikan
+      sesuai ketentuan peraturan perundangan yang berlaku.</p>
 
-      <p>PIHAK KEDUA dengan ini menyatakan mengerti dan akan patuh pada seluruh isi
-      perjanjian dan menyatakan bahwa tidak ada janji-janji ataupun ketentuan-ketentuan
-      lain yang diatur selain yang tercantum pada perjanjian kerja ini.</p>
-
-      <p>Demikian Perjanjian Kerja Waktu Tertentu ini dibuat atas dasar persetujuan dan
-      kesepakatan kedua belah pihak dalam keadaan sehat walafiat, tanpa paksaan dan
-      ditanda tangani kedua belah pihak dengan sukarela, dibuat dalam rangkap 2 (dua)
-      bermaterai cukup yang satu sama lainnya mempunyai kekuatan hukum yang sama.</p>
+      <p>Perjanjian ini dibuat atas dasar persetujuan dan kesepakatan kedua
+      belah pihak tanpa paksaan dan ditandatangani dengan sukarela.</p>
 
       <div class="sign">
-        <div>PIHAK PERTAMA<br>CV. Zayco Boga Alifa<br><br>${cgEsc(d.representative)}<br>${cgEsc(d.representativeTitle)}</div>
-        <div>PIHAK KEDUA<br><br><br>${cgEsc(d.employee?.full_name || '')}<br>${cgEsc(d.position)}</div>
+        <div>PIHAK PERTAMA<br>${cgEsc(d.company)}<br><br>${cgEsc(d.representative)}</div>
+        <div>PIHAK KEDUA<br><br><br>${cgEsc(d.employee?.full_name || '')}</div>
       </div>
     </div>`;
 }
@@ -2187,56 +2092,31 @@ function cgPkwttHtml(d) {
 }
 
 function cgAmendmentHtml(d) {
-  const oldStart = d.previousStartDate ? cgDate(d.previousStartDate) : '[TANGGAL MULAI LAMA]';
-  const oldEnd = d.previousEndDate ? cgDate(d.previousEndDate) : '[TANGGAL BERAKHIR LAMA]';
-  const newStart = d.startDate ? cgDate(d.startDate) : '[TANGGAL MULAI BARU]';
-  const newEnd = d.endDate ? cgDate(d.endDate) : '[TANGGAL BERAKHIR BARU]';
-
   return `
     <div class="cg-doc">
-      <h1>${cgEsc(d.amendmentLabel || 'AMANDemen I')}</h1>
-      <h1 style="font-size:14pt;margin-top:-8px;">PERJANJIAN KERJA WAKTU TERETENTU</h1>
-      <p class="center">Nomor: ${cgEsc(d.number || '[NOMOR DOKUMEN]')}</p>
+      <h1>AMANDemen PERJANJIAN KERJA WAKTU TERTENTU</h1>
+      <p class="center">No. ${cgEsc(d.number || '[NOMOR DOKUMEN]')}</p>
 
-      <p>Yang bertanda tangan di bawah ini:</p>
+      <p>Amandemen ini merupakan perubahan atas Perjanjian Kerja Waktu Tertentu
+      antara <b>${cgEsc(d.company)}</b> sebagai PIHAK PERTAMA dan
+      <b>${cgEsc(d.employee?.full_name || '')}</b> sebagai PIHAK KEDUA.</p>
 
-      <p><b>1. Pihak Perusahaan</b><br>
-      Nama Perusahaan : CV. Zayco Boga Alifa<br>
-      Alamat Perusahaan : ${cgEsc(d.companyAddress)}<br>
-      Dalam hal ini diwakili oleh<br>
-      Nama : ${cgEsc(d.representative)}<br>
-      Jabatan : ${cgEsc(d.representativeTitle)}<br>
-      Dalam hal ini bertindak untuk dan atas nama CV Zayco Boga Alifa,
-      Selanjutnya disebut sebagai “Pihak Pertama”.</p>
+      <h2>PERUBAHAN</h2>
+      <table>
+        <tr><td>Karyawan</td><td>${cgEsc(d.employee?.full_name || '')}</td></tr>
+        <tr><td>Jabatan</td><td>${cgEsc(d.position)}</td></tr>
+        <tr><td>Departemen</td><td>${cgEsc(d.department)}</td></tr>
+        <tr><td>Periode Baru</td><td>${cgDate(d.startDate)} s/d ${cgDate(d.endDate)}</td></tr>
+        <tr><td>Lokasi Kerja</td><td>${cgEsc(d.location)}</td></tr>
+      </table>
 
-      <p><b>2. Nama Pekerja : ${cgEsc(d.employee?.full_name || '')}</b><br>
-      NIK : ${cgEsc(d.employee?.employee_number || '-')}<br>
-      Tempat, &amp; Tanggal lahir : ${cgEsc(d.birthInfo || '-')}<br>
-      Jenis Kelamin : ${cgEsc(d.gender || '-')}<br>
-      Alamat : ${cgEsc(d.employee?.address || '-')}<br>
-      Dalam Hal ini disebut “Pihak Kedua”.</p>
-
-      <p>Bersepakat untuk mengadakan Amandemen I terhadap Kesepakatan Kerja
-      Waktu Tertentu No. ${cgEsc(d.previousContractNumber || d.number || '[NOMOR KONTRAK SEBELUMNYA]')}
-      dengan rincian sebagai berikut:</p>
-
-      <h2>Pasal I</h2>
-      <h2 style="font-size:11pt;">Jangka Waktu Kesepakatan Kerja</h2>
-
-      <p><b>Semula berbunyi:</b></p>
-      <p>Perjanjian Kerja Waktu Tertentu ini berlaku terhitung mulai tanggal
-      <b>${oldStart}</b> sampai dengan tanggal <b>${oldEnd}</b>.</p>
-
-      <p><b>Diubah Menjadi:</b></p>
-      <p>Perjanjian Kerja Waktu Tertentu ini berlaku terhitung mulai tanggal
-      <b>${newStart}</b> sampai dengan tanggal <b>${newEnd}</b>.</p>
-
-      <p>Demikian Amandemen I ini dibuat dan ditandatangani berdasarkan
-      kesepakatan kedua belah pihak.</p>
+      <p>Ketentuan lain dalam perjanjian sebelumnya yang tidak diubah melalui
+      amandemen ini tetap berlaku sesuai dokumen sumber yang disepakati para
+      pihak.</p>
 
       <div class="sign">
-        <div>Pihak Pertama<br><br><br>${cgEsc(d.representative)}<br>${cgEsc(d.representativeTitle)}</div>
-        <div>Pihak Kedua<br><br><br>${cgEsc(d.employee?.full_name || '')}<br>Karyawan</div>
+        <div>PIHAK PERTAMA<br>${cgEsc(d.company)}<br><br>${cgEsc(d.representative)}</div>
+        <div>PIHAK KEDUA<br><br><br>${cgEsc(d.employee?.full_name || '')}</div>
       </div>
     </div>`;
 }
@@ -2267,84 +2147,6 @@ function cgPrintCss() {
     </style>`;
 }
 
-function cgCompanyDocCode(emp) {
-  const name = cgCompanyName(emp);
-  return /zayco/i.test(name) ? 'CV.ZBA' : (/my cake/i.test(name) ? 'IMC' : String(name || 'HO').replace(/[^A-Z0-9]+/gi, '').slice(0, 8).toUpperCase() || 'HO');
-}
-
-function cgNextRoman(n) {
-  const vals = [[1000,'M'],[900,'CM'],[500,'D'],[400,'CD'],[100,'C'],[90,'XC'],[50,'L'],[40,'XL'],[10,'X'],[9,'IX'],[5,'V'],[4,'IV'],[1,'I']];
-  let out = '';
-  for (const [v,s] of vals) { while (n >= v) { out += s; n -= v; } }
-  return out || 'I';
-}
-
-function cgNextContractNumber(emp, type, year = new Date().getFullYear()) {
-  const prefix = ({ pkwt: 'PKWT', pkwtt: 'PKWTT', offering_letter: 'OL' }[type] || 'DOC');
-  const code = cgCompanyDocCode(emp);
-  const re = new RegExp('^(\\d+)\\/' + prefix + '-HO\\/.*' + code.replace('.', '\\.') + '\\/' + year + '$', 'i');
-  let max = 0;
-  for (const c of (state.contracts || [])) {
-    const num = String(c?.contract_number || '').trim();
-    const m = num.match(re);
-    if (m) max = Math.max(max, Number(m[1]) || 0);
-  }
-  return String(max + 1).padStart(3, '0') + '/' + prefix + '-HO/' + code + '/' + year;
-}
-
-function cgLatestPkwt(empId) {
-  return (state.contracts || [])
-    .filter(c => c.employee_id === empId && String(c.contract_type || '').toLowerCase() === 'pkwt')
-    .sort((a,b) => String(b.start_date || b.created_at || '').localeCompare(String(a.start_date || a.created_at || '')))[0] || null;
-}
-
-function cgNextAmendmentLabel(empId) {
-  const count = (state.contracts || []).filter(c => c.employee_id === empId && String(c.contract_type || '').toLowerCase() === 'amendment').length;
-  return 'AMENDMENT ' + cgNextRoman(count + 1);
-}
-
-function cgAutoNumber(emp, type) {
-  if (!emp || !type) return '';
-  if (type === 'amendment') {
-    const prev = cgLatestPkwt(emp.id);
-    return prev?.contract_number ? cgNextAmendmentLabel(emp.id) + ' - ' + prev.contract_number : cgNextAmendmentLabel(emp.id);
-  }
-  return cgNextContractNumber(emp, type);
-}
-
-function cgApplyAutoContractFields(modal) {
-  const employeeSelect = modal.querySelector('[name="cg_employee_id"]');
-  const typeSelect = modal.querySelector('[name="cg_type"]');
-  const numberInput = modal.querySelector('[name="cg_number"]');
-  const prevNumber = modal.querySelector('[name="cg_previous_contract_number"]');
-  const prevStart = modal.querySelector('[name="cg_previous_start_date"]');
-  const prevEnd = modal.querySelector('[name="cg_previous_end_date"]');
-  const emp = state.employees.find(e => e.id === employeeSelect?.value);
-  const type = typeSelect?.value;
-  if (!emp || !type) return;
-
-  if (numberInput) numberInput.value = cgAutoNumber(emp, type);
-  const amendment = type === 'amendment';
-  [prevNumber, prevStart, prevEnd].forEach(el => { if (el) el.readOnly = amendment; });
-
-  if (amendment) {
-    const prev = cgLatestPkwt(emp.id);
-    if (prev) {
-      if (prevNumber) prevNumber.value = prev.contract_number || '';
-      if (prevStart) prevStart.value = prev.start_date || '';
-      if (prevEnd) prevEnd.value = prev.end_date || '';
-    } else {
-      if (prevNumber) prevNumber.value = '';
-      if (prevStart) prevStart.value = '';
-      if (prevEnd) prevEnd.value = '';
-    }
-  } else {
-    if (prevNumber) prevNumber.value = '';
-    if (prevStart) prevStart.value = '';
-    if (prevEnd) prevEnd.value = '';
-  }
-}
-
 function cgOpenGenerator() {
   const body = `
     <div class="info-box">
@@ -2371,25 +2173,11 @@ function cgOpenGenerator() {
         </select>
       </div>
 
-      <div class="field">
-        <label>No. Dokumen / Kontrak</label>
-        <div class="row-actions">
-          <input name="cg_number" readonly>
-          <button type="button" class="btn btn-light btn-sm" onclick="cgApplyAutoContractFields(this.closest('.modal'))">↻ Generate</button>
-        </div>
-        <small>Nomor dibuat otomatis berdasarkan perusahaan, jenis dokumen, dan tahun.</small>
-      </div>
-      ${cgField('cg_previous_contract_number', 'No. Kontrak Sebelumnya')}
-      ${cgDateField('cg_previous_start_date', 'Periode Sebelumnya — Mulai')}
-      ${cgDateField('cg_previous_end_date', 'Periode Sebelumnya — Berakhir')}
+      ${cgField('cg_number', 'No. Dokumen / Kontrak')}
       ${cgDateField('cg_join_date', 'Tanggal Bergabung')}
       ${cgDateField('cg_start_date', 'Tanggal Mulai', '', true)}
       ${cgDateField('cg_end_date', 'Tanggal Berakhir')}
       ${cgDateField('cg_signed_date', 'Tanggal Tanda Tangan')}
-
-      ${cgField('cg_status_text', 'Status Karyawan', 'Probation - 3 Bulan')}
-      ${cgField('cg_birth_info', 'Tempat & Tanggal Lahir')}
-      ${cgField('cg_gender', 'Jenis Kelamin')}
 
       ${cgField('cg_department', 'Departemen')}
       ${cgField('cg_position', 'Jabatan')}
@@ -2473,12 +2261,9 @@ function cgOpenGenerator() {
 
     if (e.join_date)
       modal.querySelector('[name="cg_join_date"]').value = e.join_date;
-
-    cgApplyAutoContractFields(modal);
   };
 
   modal.querySelector('[name="cg_employee_id"]').onchange = refresh;
-  modal.querySelector('[name="cg_type"]').onchange = refresh;
   refresh();
   return modal;
 }
@@ -2692,287 +2477,239 @@ function contracts() {
     </div>`;
 }
 /* =========================================================
-   PHASE 5 FINAL FIX — AMENDMENT PKWT AUTO-LINK
-   Overrides the Contract Generator amendment behavior.
+   PHASE 6 — IZIN & CUTI
+   Dashboard, pengajuan, saldo, approval, riwayat & kalender.
    ========================================================= */
 
-function cgLatestPreviousPkwt(employeeId) {
-  return (state.contracts || [])
-    .filter(c => c.employee_id === employeeId && c.contract_type === 'pkwt')
-    .sort((a, b) => {
-      const ad = a.start_date || '';
-      const bd = b.start_date || '';
-      return bd.localeCompare(ad);
-    })[0] || null;
+state.leaveTypes = state.leaveTypes || [];
+state.leaveBalances = state.leaveBalances || [];
+state.leaveApprovals = state.leaveApprovals || [];
+state.leaveDays = state.leaveDays || [];
+state.leaveF = state.leaveF || { q:'', type:'', status:'', from:'', to:'' };
+
+/* ---------- Phase 6 data loader ---------- */
+const phase6OriginalLoadAll = loadAll;
+async function loadAll() {
+  await phase6OriginalLoadAll();
+  const qs = await Promise.all([
+    sb.from('leave_types').select('*').order('name'),
+    sb.from('leave_balances').select('*'),
+    sb.from('leave_approvals').select('*').order('created_at', { ascending: false }),
+    sb.from('leave_days').select('*').order('leave_date', { ascending: true })
+  ]);
+  const names = ['jenis cuti/izin','saldo cuti','approval cuti','detail hari cuti'];
+  qs.forEach((q,i) => {
+    if (q.error) toast('Gagal memuat ' + names[i] + ': ' + friendlyError(q.error), 'error');
+  });
+  state.leaveTypes = qs[0].data || [];
+  state.leaveBalances = qs[1].data || [];
+  state.leaveApprovals = qs[2].data || [];
+  state.leaveDays = qs[3].data || [];
 }
 
-function cgAmendmentNumber(previousContract) {
-  return previousContract?.contract_number || '';
+function leaveStatusBadge(s) {
+  const x = String(s || '').toLowerCase();
+  const cls = x === 'approved' ? 'badge-green' : x === 'rejected' ? 'badge-red' : x === 'cancelled' ? 'badge-gray' : 'badge-yellow';
+  const label = ({pending:'Menunggu',approved:'Disetujui',rejected:'Ditolak',cancelled:'Dibatalkan'})[x] || s || '-';
+  return `<span class="badge ${cls}">${esc(label)}</span>`;
 }
 
-function cgAmendmentHtml(d) {
-  const oldStart = d.previousStartDate ? cgDate(d.previousStartDate) : '-';
-  const oldEnd = d.previousEndDate ? cgDate(d.previousEndDate) : '-';
-  const newStart = d.startDate ? cgDate(d.startDate) : '-';
-  const newEnd = d.endDate ? cgDate(d.endDate) : '-';
-  const previousNo = d.previousContractNumber || d.number || '-';
-
-  return `
-    <div class="cg-doc">
-      <h1>AMANDemen I</h1>
-      <h1 style="font-size:14pt;margin-top:-8px;">PERJANJIAN KERJA WAKTU TERTENTU</h1>
-      <p class="center">Nomor: ${cgEsc(d.number || previousNo)}</p>
-
-      <p>Yang bertanda tangan di bawah ini:</p>
-
-      <p><b>1. Pihak Perusahaan</b><br>
-      Nama Perusahaan : CV. Zayco Boga Alifa<br>
-      Alamat Perusahaan : ${cgEsc(d.companyAddress || '-') }<br>
-      Dalam hal ini diwakili oleh<br>
-      Nama : ${cgEsc(d.representative || '-') }<br>
-      Jabatan : ${cgEsc(d.representativeTitle || '-') }<br>
-      Dalam hal ini bertindak untuk dan atas nama CV Zayco Boga Alifa,
-      Selanjutnya disebut sebagai “Pihak Pertama”.</p>
-
-      <p><b>2. Nama Pekerja : ${cgEsc(d.employee?.full_name || '-') }</b><br>
-      NIK : ${cgEsc(d.employee?.employee_number || '-') }<br>
-      Tempat, &amp; Tanggal lahir : ${cgEsc(d.birthInfo || '-') }<br>
-      Jenis Kelamin : ${cgEsc(d.gender || '-') }<br>
-      Alamat : ${cgEsc(d.employee?.address || '-') }<br>
-      Dalam Hal ini disebut “Pihak Kedua”.</p>
-
-      <p>Bersepakat untuk mengadakan Amandemen I terhadap Kesepakatan Kerja
-      Waktu Tertentu No. ${cgEsc(previousNo)} dengan rincian sebagai berikut:</p>
-
-      <h2>Pasal I</h2>
-      <h2 style="font-size:11pt;">Jangka Waktu Kesepakatan Kerja</h2>
-
-      <p><b>Semula berbunyi:</b></p>
-      <p>Perjanjian Kerja Waktu Tertentu ini berlaku terhitung mulai tanggal
-      <b>${oldStart}</b> sampai dengan tanggal <b>${oldEnd}</b>.</p>
-
-      <p><b>Diubah Menjadi:</b></p>
-      <p>Perjanjian Kerja Waktu Tertentu ini berlaku terhitung mulai tanggal
-      <b>${newStart}</b> sampai dengan tanggal <b>${newEnd}</b>.</p>
-
-      <p>Demikian Amandemen I ini dibuat dan ditandatangani berdasarkan
-      kesepakatan kedua belah pihak.</p>
-
-      <div class="sign">
-        <div>Pihak Pertama<br><br><br>${cgEsc(d.representative || '-') }<br>${cgEsc(d.representativeTitle || '-') }</div>
-        <div>Pihak Kedua<br><br><br>${cgEsc(d.employee?.full_name || '-') }<br>Karyawan</div>
-      </div>
-    </div>`;
+function leaveTypeName(id) {
+  return state.leaveTypes.find(x => x.id === id)?.name || '-';
 }
 
-function cgCollectFormData(form) {
-  const fd = new FormData(form);
-  const emp = state.employees.find(e => e.id === fd.get('cg_employee_id'));
-
-  return {
-    employee: emp,
-    company: cgCompanyName(emp),
-    type: fd.get('cg_type'),
-    number: String(fd.get('cg_number') || '').trim(),
-    joinDate: fd.get('cg_join_date') || emp?.join_date || '',
-    startDate: fd.get('cg_start_date') || '',
-    endDate: fd.get('cg_end_date') || '',
-    signedDate: fd.get('cg_signed_date') || '',
-    department: String(fd.get('cg_department') || cgDepartment(emp)).trim(),
-    position: String(fd.get('cg_position') || cgPosition(emp)).trim(),
-    supervisor: String(fd.get('cg_supervisor') || '').trim(),
-    workDays: String(fd.get('cg_work_days') || '').trim(),
-    location: String(fd.get('cg_location') || cgCurrentLocation(emp)).trim(),
-    baseSalary: Number(fd.get('cg_base_salary')) || 0,
-    positionAllowance: Number(fd.get('cg_position_allowance')) || 0,
-    performance: Number(fd.get('cg_performance')) || 0,
-    discipline: Number(fd.get('cg_discipline')) || 0,
-    meal: Number(fd.get('cg_meal')) || 0,
-    thr: Number(fd.get('cg_thr')) || 0,
-    representative: String(fd.get('cg_rep') || '').trim(),
-    representativeTitle: String(fd.get('cg_rep_title') || '').trim(),
-    companyAddress: String(fd.get('cg_company_address') || '').trim(),
-    notes: String(fd.get('cg_notes') || '').trim(),
-    statusText: String(fd.get('cg_status_text') || '').trim(),
-    birthInfo: String(fd.get('cg_birth_info') || '').trim(),
-    gender: String(fd.get('cg_gender') || '').trim(),
-    previousContractNumber: String(fd.get('cg_previous_contract_number') || '').trim(),
-    previousStartDate: fd.get('cg_previous_start_date') || '',
-    previousEndDate: fd.get('cg_previous_end_date') || '',
-    previousContractId: String(fd.get('cg_previous_contract_id') || '').trim()
-  };
+function leaveCategory(id) {
+  return state.leaveTypes.find(x => x.id === id)?.category || '';
 }
 
-function cgOpenGenerator() {
+function leaveEmployeeName(id) {
+  return state.employees.find(x => x.id === id)?.full_name || '-';
+}
+
+function leaveQuotaFor(employeeId, typeId, year) {
+  const b = state.leaveBalances.find(x => x.employee_id === employeeId && x.leave_type_id === typeId && Number(x.year) === Number(year));
+  if (b) {
+    const direct = ['remaining_days','balance_days','remaining','sisa_days','saldo'].map(k => b[k]).find(v => v !== undefined && v !== null);
+    if (direct !== undefined) return Number(direct) || 0;
+    const quota = Number(b.quota_days ?? b.entitlement_days ?? b.opening_balance ?? state.leaveTypes.find(x=>x.id===typeId)?.quota_days ?? 0) || 0;
+    const used = Number(b.used_days ?? 0) || 0;
+    const adj = Number(b.adjustment_days ?? b.adjustment ?? 0) || 0;
+    return quota + adj - used;
+  }
+  const t = state.leaveTypes.find(x => x.id === typeId);
+  const quota = Number(t?.quota_days ?? 0) || 0;
+  const used = state.leave.filter(x => x.employee_id === employeeId && x.leave_type_id === typeId && String(x.status).toLowerCase() === 'approved' && String(x.start_date || '').startsWith(String(year))).reduce((n,x)=>n + Number(x.total_days || 0),0);
+  return quota - used;
+}
+
+function leaveCalcDays(start, end, halfDay) {
+  if (!start || !end || end < start) return 0;
+  const a = new Date(start + 'T00:00:00Z'), b = new Date(end + 'T00:00:00Z');
+  let n = Math.floor((b-a)/86400000)+1;
+  if (halfDay && n === 1) n = 0.5;
+  return n;
+}
+
+function leaveCanApprove(r) {
+  return String(r?.status || '').toLowerCase() === 'pending';
+}
+
+async function leaveUpdateStatus(id, status, note='') {
+  const payload = { status };
+  const extra = status === 'approved'
+    ? { approved_at:new Date().toISOString(), approved_by:state.profile?.id || null, approval_notes:note || null }
+    : { rejected_at: status === 'rejected' ? new Date().toISOString() : null, rejected_by: status === 'rejected' ? (state.profile?.id || null) : null, approval_notes:note || null };
+  let res = await sb.from('leave_requests').update({...payload,...extra}).eq('id',id).select();
+  if (res.error && /column .* does not exist|schema cache|PGRST204/i.test(res.error.message || '')) {
+    res = await sb.from('leave_requests').update(payload).eq('id',id).select();
+  }
+  if (res.error) { toast(friendlyError(res.error),'error'); return false; }
+  // Approval history is best-effort so an older migration cannot block approval.
+  const approvalPayloads = [
+    { leave_request_id:id, approver_id:state.profile?.id || null, status, notes:note || null, acted_at:new Date().toISOString() },
+    { leave_request_id:id, approved_by:state.profile?.id || null, status, notes:note || null, approved_at:new Date().toISOString() },
+    { leave_request_id:id, status, notes:note || null }
+  ];
+  for (const p of approvalPayloads) {
+    const a = await sb.from('leave_approvals').insert(p).select();
+    if (!a.error) break;
+    if (!/column .* does not exist|schema cache|PGRST204/i.test(a.error.message || '')) break;
+  }
+  await loadAll(); renderApp(); return true;
+}
+
+window.leaveApprove = async id => {
+  const r = state.leave.find(x => x.id === id); if (!r || !leaveCanApprove(r)) return;
+  const note = prompt('Catatan approval (opsional):','') ?? '';
+  if (!confirm('Setujui pengajuan cuti/izin ini?')) return;
+  await leaveUpdateStatus(id,'approved',note);
+};
+window.leaveReject = async id => {
+  const r = state.leave.find(x => x.id === id); if (!r || !leaveCanApprove(r)) return;
+  const note = prompt('Alasan penolakan:','') ?? '';
+  if (!note.trim()) { toast('Alasan penolakan wajib diisi.','error'); return; }
+  if (!confirm('Tolak pengajuan cuti/izin ini?')) return;
+  await leaveUpdateStatus(id,'rejected',note);
+};
+window.leaveCancel = async id => {
+  const r = state.leave.find(x => x.id === id); if (!r) return;
+  if (!confirm('Batalkan pengajuan ini?')) return;
+  await leaveUpdateStatus(id,'cancelled','Dibatalkan oleh HR.');
+};
+
+function leaveOpenForm(existing=null) {
+  const activeEmployees = state.employees.filter(e => e.employment_status !== 'inactive');
+  const types = state.leaveTypes.filter(isActive);
+  const selected = existing || {};
   const body = `
-    <div class="info-box">
-      Pilih karyawan dan jenis dokumen. Untuk <b>Amandemen PKWT</b>, sistem otomatis
-      mengambil kontrak PKWT terakhir karyawan sebagai kontrak sebelumnya.
-    </div>
-
-    <div class="modal-grid">
-      <div class="field field-full">
-        <label>Karyawan *</label>
-        <select name="cg_employee_id" required>
-          <option value="">Pilih karyawan</option>
-          ${cgEmployeeOptions('')}
-        </select>
-      </div>
-
-      <div class="field">
-        <label>Jenis Dokumen *</label>
-        <select name="cg_type" required>
-          <option value="offering_letter">Offering Letter</option>
-          <option value="pkwt">PKWT</option>
-          <option value="pkwtt">PKWTT</option>
-          <option value="amendment">Amandemen PKWT</option>
-        </select>
-      </div>
-
-      ${cgField('cg_number', 'No. Dokumen / Kontrak')}
-      <input type="hidden" name="cg_previous_contract_id" value="">
-      ${cgField('cg_previous_contract_number', 'No. Kontrak Sebelumnya')}
-      ${cgDateField('cg_previous_start_date', 'Periode Sebelumnya — Mulai')}
-      ${cgDateField('cg_previous_end_date', 'Periode Sebelumnya — Berakhir')}
-      ${cgDateField('cg_join_date', 'Tanggal Bergabung')}
-      ${cgDateField('cg_start_date', 'Tanggal Mulai', '', true)}
-      ${cgDateField('cg_end_date', 'Tanggal Berakhir')}
-      ${cgDateField('cg_signed_date', 'Tanggal Tanda Tangan')}
-
-      ${cgField('cg_status_text', 'Status Karyawan', 'Probation - 3 Bulan')}
-      ${cgField('cg_birth_info', 'Tempat & Tanggal Lahir')}
-      ${cgField('cg_gender', 'Jenis Kelamin')}
-      ${cgField('cg_department', 'Departemen')}
-      ${cgField('cg_position', 'Jabatan')}
-      ${cgField('cg_supervisor', 'Melapor Kepada', 'PIC (Person In Charge) - SPV/Asst.')}
-      ${cgField('cg_work_days', 'Hari & Jam Kerja', '6 (Enam) Hari kerja, 1 (Satu) Hari Libur')}
-
-      <div class="field field-full">
-        <label>Lokasi Kerja</label>
-        <input name="cg_location">
-      </div>
-
-      <div class="field field-full"><div class="sub-title">Remunerasi</div></div>
-      ${cgNumField('cg_base_salary', 'Gaji Pokok')}
-      ${cgNumField('cg_position_allowance', 'Tunjangan Jabatan')}
-      ${cgNumField('cg_performance', 'Insentif Kinerja')}
-      ${cgNumField('cg_discipline', 'Tunjangan Kedisiplinan')}
-      ${cgNumField('cg_meal', 'Tunjangan Makan')}
-      ${cgNumField('cg_thr', 'THR')}
-
-      <div class="field field-full"><div class="sub-title">Pihak Pertama</div></div>
-      ${cgField('cg_rep', 'Nama Perwakilan')}
-      ${cgField('cg_rep_title', 'Jabatan Perwakilan')}
-      <div class="field field-full">
-        <label>Alamat Perusahaan</label>
-        <textarea name="cg_company_address" rows="2"></textarea>
-      </div>
+    <div class="grid-2">
+      <div class="field field-full"><label>Karyawan *</label><select name="employee_id" required><option value="">Pilih karyawan</option>${activeEmployees.map(e=>`<option value="${esc(e.id)}" ${selected.employee_id===e.id?'selected':''}>${esc(e.full_name)} — ${esc(e.employee_number||'')}</option>`).join('')}</select></div>
+      <div class="field"><label>Jenis Cuti / Izin *</label><select name="leave_type_id" required><option value="">Pilih jenis</option>${types.map(t=>`<option value="${esc(t.id)}" ${selected.leave_type_id===t.id?'selected':''}>${esc(t.name)}${t.category?` — ${esc(t.category)}`:''}</option>`).join('')}</select></div>
+      <div class="field"><label>Status</label><select name="status"><option value="pending" ${(!selected.status||selected.status==='pending')?'selected':''}>Menunggu</option><option value="approved" ${selected.status==='approved'?'selected':''}>Disetujui</option><option value="rejected" ${selected.status==='rejected'?'selected':''}>Ditolak</option></select></div>
+      <div class="field"><label>Tanggal Mulai *</label><input name="start_date" type="date" required value="${esc(selected.start_date||'')}"></div>
+      <div class="field"><label>Tanggal Selesai *</label><input name="end_date" type="date" required value="${esc(selected.end_date||'')}"></div>
+      <div class="field"><label>Setengah Hari</label><select name="half_day"><option value="false">Tidak</option><option value="true" ${selected.half_day?'selected':''}>Ya</option></select></div>
+      <div class="field"><label>Total Hari</label><input name="total_days" type="number" min="0.5" step="0.5" value="${esc(selected.total_days ?? '')}" readonly></div>
+      <div class="field field-full"><label>Alasan / Keterangan</label><textarea name="reason" rows="3" placeholder="Alasan cuti/izin...">${esc(selected.reason||'')}</textarea></div>
+      <div class="field field-full"><label>Dokumen Pendukung (opsional)</label><input name="leave_file" type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"></div>
+      <div class="field field-full"><label>Catatan HR</label><textarea name="notes" rows="2">${esc(selected.notes||'')}</textarea></div>
     </div>`;
-
-  const modal = openModal(
-    'Buat & Export Kontrak',
-    body,
-    async form => {
-      const d = cgCollectFormData(form);
-
-      if (!d.employee || !d.type) {
-        toast('Lengkapi Karyawan dan Jenis Dokumen.', 'error');
-        return false;
-      }
-
-      if (d.type !== 'amendment' && !d.startDate) {
-        toast('Tanggal Mulai wajib diisi.', 'error');
-        return false;
-      }
-
-      if (d.type === 'amendment') {
-        if (!d.previousContractId || !d.previousContractNumber || !d.previousStartDate || !d.previousEndDate) {
-          toast('Kontrak PKWT sebelumnya belum ditemukan. Pilih karyawan yang memiliki kontrak PKWT.', 'error');
-          return false;
-        }
-        if (!d.startDate || !d.endDate) {
-          toast('Untuk Amandemen PKWT, isi Tanggal Mulai Baru dan Tanggal Berakhir Baru.', 'error');
-          return false;
-        }
-        if (!d.number) d.number = d.previousContractNumber;
-      }
-
-      const preview = `
-        <div class="section">
-          <div class="section-head">
-            <h2>Preview Dokumen</h2>
-            <div class="row-actions">
-              <button type="button" class="btn btn-light" onclick="cgExportWord()">📄 Export Word</button>
-              <button type="button" class="btn btn-primary" onclick="cgExportPdf()">📕 Export PDF</button>
-            </div>
-          </div>
-          <div id="cgPreview">${cgBuildHtml(d)}</div>
-        </div>`;
-
-      modal.querySelector('.modal').innerHTML = `
-        <div class="section-head">
-          <h2>Preview ${cgEsc(cgTypeLabel(d.type))}</h2>
-          <button type="button" class="btn btn-light" data-close>Tutup</button>
-        </div>
-        ${preview}`;
-
-      modal.querySelectorAll('[data-close]').forEach(b => b.onclick = () => modal.remove());
-      window._cgExportData = d;
-      return false;
-    },
-    'Preview'
-  );
-
-  const employeeSelect = modal.querySelector('[name="cg_employee_id"]');
-  const typeSelect = modal.querySelector('[name="cg_type"]');
-
-  const refresh = () => {
-    const e = state.employees.find(x => x.id === employeeSelect.value);
-    if (!e) return;
-
-    const company = cgCompanyName(e);
-    const defaults = cgCompanyDefaults(company);
-
-    modal.querySelector('[name="cg_department"]').value = cgDepartment(e);
-    modal.querySelector('[name="cg_position"]').value = cgPosition(e);
-    modal.querySelector('[name="cg_location"]').value = cgCurrentLocation(e);
-    modal.querySelector('[name="cg_rep"]').value = defaults.representative;
-    modal.querySelector('[name="cg_rep_title"]').value = defaults.representative_title;
-    modal.querySelector('[name="cg_company_address"]').value = defaults.address;
-    modal.querySelector('[name="cg_join_date"]').value = e.join_date || '';
-
-    // Auto-number every document type; amendment links to the latest PKWT.
-    const numberInput = modal.querySelector('[name="cg_number"]');
-    const prevNumber = modal.querySelector('[name="cg_previous_contract_number"]');
-    const prevStart = modal.querySelector('[name="cg_previous_start_date"]');
-    const prevEnd = modal.querySelector('[name="cg_previous_end_date"]');
-    const prevId = modal.querySelector('[name="cg_previous_contract_id"]');
-    const prevFields = [prevNumber, prevStart, prevEnd].filter(Boolean);
-    const showPrevious = typeSelect.value === 'amendment';
-    prevFields.forEach(el => { const wrap = el.closest('.field'); if (wrap) wrap.style.display = showPrevious ? '' : 'none'; });
-
-    if (typeSelect.value === 'amendment') {
-      const previous = cgLatestPreviousPkwt(e.id);
-      modal.querySelector('[name="cg_previous_contract_id"]').value = previous?.id || '';
-      modal.querySelector('[name="cg_previous_contract_number"]').value = previous?.contract_number || '';
-      modal.querySelector('[name="cg_previous_start_date"]').value = previous?.start_date || '';
-      modal.querySelector('[name="cg_previous_end_date"]').value = previous?.end_date || '';
-      // The amendment document number is the amendment label plus the referenced PKWT number.
-      modal.querySelector('[name="cg_number"]').value = previous?.contract_number ? (cgNextAmendmentLabel(e.id) + ' - ' + previous.contract_number) : cgNextAmendmentLabel(e.id);
-      modal.querySelector('[name="cg_start_date"]').value = '';
-      modal.querySelector('[name="cg_end_date"]').value = '';
-      modal.querySelector('[name="cg_signed_date"]').value = '';
-    } else {
-      modal.querySelector('[name="cg_previous_contract_id"]').value = '';
-      modal.querySelector('[name="cg_previous_contract_number"]').value = '';
-      modal.querySelector('[name="cg_previous_start_date"]').value = '';
-      modal.querySelector('[name="cg_previous_end_date"]').value = '';
-      if (numberInput) numberInput.value = cgNextContractNumber(e, typeSelect.value);
+  const modal = openModal(existing ? 'Edit Pengajuan Cuti / Izin' : 'Pengajuan Cuti / Izin', body, async form => {
+    const fd = new FormData(form);
+    const employee_id = fd.get('employee_id') || '';
+    const leave_type_id = fd.get('leave_type_id') || '';
+    const start_date = fd.get('start_date') || '';
+    const end_date = fd.get('end_date') || '';
+    const half_day = fd.get('half_day') === 'true';
+    if (!employee_id || !leave_type_id || !start_date || !end_date) { toast('Lengkapi karyawan, jenis dan tanggal.','error'); return false; }
+    if (end_date < start_date) { toast('Tanggal selesai tidak boleh sebelum tanggal mulai.','error'); return false; }
+    const total_days = leaveCalcDays(start_date,end_date,half_day);
+    if (!total_days) { toast('Jumlah hari tidak valid.','error'); return false; }
+    const clean = v => String(v ?? '').trim() || null;
+    let payload = { employee_id, leave_type_id, start_date, end_date, total_days, reason:clean(fd.get('reason')), status:clean(fd.get('status'))||'pending', notes:clean(fd.get('notes')) };
+    const file = fd.get('leave_file');
+    if (file && file.size) {
+      if (file.size > 10*1024*1024) { toast('Ukuran dokumen maksimal 10 MB.','error'); return false; }
+      const safe = String(file.name||'dokumen').replace(/[^a-zA-Z0-9._-]+/g,'_');
+      const path = `leave/${employee_id}/${new Date().getFullYear()}/${Date.now()}-${safe}`;
+      const up = await sb.storage.from('hr-documents').upload(path,file,{upsert:false,contentType:file.type||'application/octet-stream'});
+      if (up.error) { toast('Gagal upload dokumen: '+up.error.message,'error'); return false; }
+      payload.attachment_path = path;
     }
+    let res = existing
+      ? await sb.from('leave_requests').update(payload).eq('id',existing.id).select()
+      : await sb.from('leave_requests').insert(payload).select();
+    if (res.error && /column .* does not exist|schema cache|PGRST204/i.test(res.error.message||'')) {
+      const core = { employee_id, leave_type_id, start_date, end_date, total_days, reason:payload.reason, status:payload.status };
+      res = existing ? await sb.from('leave_requests').update(core).eq('id',existing.id).select() : await sb.from('leave_requests').insert(core).select();
+    }
+    if (res.error) { toast(friendlyError(res.error),'error'); return false; }
+    toast(existing?'Pengajuan diperbarui.':'Pengajuan cuti/izin berhasil dibuat.');
+    return true;
+  });
+  const updateDays = () => {
+    const s = modal.querySelector('[name="start_date"]')?.value;
+    const e = modal.querySelector('[name="end_date"]')?.value;
+    const h = modal.querySelector('[name="half_day"]')?.value === 'true';
+    const out = modal.querySelector('[name="total_days"]'); if(out) out.value = leaveCalcDays(s,e,h)||'';
   };
+  ['start_date','end_date','half_day'].forEach(n=>modal.querySelector(`[name="${n}"]`)?.addEventListener('change',updateDays));
+  updateDays();
+}
 
-  employeeSelect.onchange = refresh;
-  typeSelect.onchange = refresh;
-  refresh();
-  return modal;
+function leaveDashboardCards(rows) {
+  const pending=rows.filter(x=>String(x.status).toLowerCase()==='pending').length;
+  const approved=rows.filter(x=>String(x.status).toLowerCase()==='approved').length;
+  const rejected=rows.filter(x=>String(x.status).toLowerCase()==='rejected').length;
+  const today=todayJakarta();
+  const on=rows.filter(x=>String(x.status).toLowerCase()==='approved' && x.start_date<=today && x.end_date>=today).length;
+  return `<div class="cards" style="margin-bottom:14px"><div class="card"><div class="muted">Menunggu Approval</div><div class="metric">${pending}</div></div><div class="card"><div class="muted">Disetujui</div><div class="metric">${approved}</div></div><div class="card"><div class="muted">Ditolak</div><div class="metric">${rejected}</div></div><div class="card"><div class="muted">Sedang Cuti / Izin</div><div class="metric">${on}</div></div></div>`;
+}
+
+function leave() {
+  const f=state.leaveF;
+  let rows=[...state.leave];
+  const q=String(f.q||'').toLowerCase();
+  rows=rows.filter(x=>!q || [leaveEmployeeName(x.employee_id),leaveTypeName(x.leave_type_id),x.reason,x.status].join(' ').toLowerCase().includes(q));
+  if(f.type) rows=rows.filter(x=>x.leave_type_id===f.type);
+  if(f.status) rows=rows.filter(x=>String(x.status).toLowerCase()===f.status);
+  if(f.from) rows=rows.filter(x=>x.end_date>=f.from);
+  if(f.to) rows=rows.filter(x=>x.start_date<=f.to);
+  const types=state.leaveTypes.filter(isActive);
+  $('#content').innerHTML=`
+    <div class="section">
+      <div class="section-head"><div><h2>Izin & Cuti Karyawan</h2><div class="muted">Kelola pengajuan, approval, saldo dan riwayat ketidakhadiran.</div></div><div class="row-actions"><button class="btn btn-light" onclick="leaveTypesManage()">Jenis Cuti / Izin</button><button class="btn btn-primary" onclick="leaveOpenForm()">+ Pengajuan Baru</button></div></div>
+      ${leaveDashboardCards(state.leave)}
+      <div class="toolbar"><input id="leaveQ" placeholder="Cari karyawan / jenis / alasan..." value="${esc(f.q)}"><select id="leaveTypeF"><option value="">Semua jenis</option>${types.map(t=>`<option value="${esc(t.id)}" ${f.type===t.id?'selected':''}>${esc(t.name)}</option>`).join('')}</select><select id="leaveStatusF"><option value="">Semua status</option><option value="pending" ${f.status==='pending'?'selected':''}>Menunggu</option><option value="approved" ${f.status==='approved'?'selected':''}>Disetujui</option><option value="rejected" ${f.status==='rejected'?'selected':''}>Ditolak</option><option value="cancelled" ${f.status==='cancelled'?'selected':''}>Dibatalkan</option></select><input id="leaveFrom" type="date" value="${esc(f.from)}"><input id="leaveTo" type="date" value="${esc(f.to)}"></div>
+      <div class="table-wrap"><table class="table"><thead><tr><th>Karyawan</th><th>Jenis</th><th>Periode</th><th>Hari</th><th>Alasan</th><th>Status</th><th>Aksi</th></tr></thead><tbody>${rows.length?rows.map(r=>`<tr><td><b>${esc(leaveEmployeeName(r.employee_id))}</b><div class="muted">${esc(state.employees.find(e=>e.id===r.employee_id)?.employee_number||'')}</div></td><td>${esc(leaveTypeName(r.leave_type_id))}</td><td>${fmtDate(r.start_date)} - ${fmtDate(r.end_date)}</td><td>${esc(r.total_days ?? '-')}</td><td>${esc(r.reason||'-')}</td><td>${leaveStatusBadge(r.status)}</td><td><div class="row-actions">${leaveCanApprove(r)?`<button class="btn btn-light btn-sm" onclick="leaveApprove('${esc(r.id)}')">Approve</button><button class="btn btn-light btn-sm" onclick="leaveReject('${esc(r.id)}')">Reject</button>`:''}<button class="btn btn-light btn-sm" onclick="leaveOpenForm(state.leave.find(x=>x.id==='${esc(r.id)}'))">Edit</button>${String(r.status).toLowerCase()!=='cancelled'?`<button class="btn btn-light btn-sm" onclick="leaveCancel('${esc(r.id)}')">Batal</button>`:''}</div></td></tr>`).join(''):'<tr><td colspan="7"><div class="card empty">Belum ada pengajuan cuti/izin.</div></td></tr>'}</tbody></table></div>
+    </div>
+    <div class="section"><div class="section-head"><div><h2>Saldo Cuti</h2><div class="muted">Tahun ${new Date().getFullYear()}</div></div></div>${leaveBalanceTable()}</div>
+    <div class="section"><div class="section-head"><h2>Kalender Cuti / Izin</h2></div>${leaveCalendar(rows)}</div>`;
+  const bind=(id,key)=>$(id)?.addEventListener('input',e=>{f[key]=e.target.value;leave();});
+  bind('#leaveQ','q'); bind('#leaveTypeF','type'); bind('#leaveStatusF','status'); bind('#leaveFrom','from'); bind('#leaveTo','to');
+}
+
+function leaveBalanceTable(){
+  const year=new Date().getFullYear(); const types=state.leaveTypes.filter(isActive).filter(t=>Number(t.quota_days||0)>0);
+  if(!types.length) return '<div class="card empty">Belum ada jenis cuti berkuota atau saldo yang disiapkan.</div>';
+  const rows=state.employees.filter(e=>e.employment_status!=='inactive').slice(0,300);
+  return `<div class="table-wrap"><table class="table"><thead><tr><th>Karyawan</th>${types.map(t=>`<th>${esc(t.name)}</th>`).join('')}</tr></thead><tbody>${rows.map(e=>`<tr><td><b>${esc(e.full_name)}</b><div class="muted">${esc(e.employee_number||'')}</div></td>${types.map(t=>`<td>${leaveQuotaFor(e.id,t.id,year)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+}
+
+function leaveCalendar(rows){
+  const year=new Date().getFullYear(), month=new Date().getMonth();
+  const first=new Date(year,month,1), days=new Date(year,month+1,0).getDate(), start=(first.getDay()+6)%7;
+  let cells=''; for(let i=0;i<start;i++) cells+='<div class="card" style="min-height:80px;opacity:.35"></div>';
+  for(let d=1;d<=days;d++){
+    const iso=`${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const list=rows.filter(r=>String(r.status).toLowerCase()==='approved'&&r.start_date<=iso&&r.end_date>=iso).slice(0,4);
+    cells+=`<div class="card" style="min-height:80px"><b>${d}</b>${list.map(r=>`<div class="muted" style="margin-top:5px">${esc(leaveEmployeeName(r.employee_id))} · ${esc(leaveTypeName(r.leave_type_id))}</div>`).join('')}</div>`;
+  }
+  return `<div style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px"><div class="muted">Sen</div><div class="muted">Sel</div><div class="muted">Rab</div><div class="muted">Kam</div><div class="muted">Jum</div><div class="muted">Sab</div><div class="muted">Min</div>${cells}</div>`;
+}
+
+function leaveTypesManage(){
+  const rows=state.leaveTypes;
+  const body=`<div class="table-wrap"><table class="table"><thead><tr><th>Kode</th><th>Nama</th><th>Kategori</th><th>Kuota</th><th>Lampiran</th><th>Approval</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${esc(r.code||'-')}</td><td><b>${esc(r.name||'-')}</b></td><td>${esc(r.category||'-')}</td><td>${esc(r.quota_days??'-')}</td><td>${r.requires_attachment?'Ya':'Tidak'}</td><td>${r.requires_approval===false?'Tidak':'Ya'}</td></tr>`).join('')||'<tr><td colspan="6">Belum ada jenis.</td></tr>'}</tbody></table></div><div class="info-box" style="margin-top:12px">Jenis cuti/izin dikelola dari database Phase 6. Jika ingin menambah atau mengubah jenis, gunakan SQL master data agar struktur tetap konsisten.</div>`;
+  openModal('Jenis Cuti / Izin',body,async()=>true,'Tutup');
 }
