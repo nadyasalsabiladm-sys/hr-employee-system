@@ -3090,3 +3090,448 @@ init = async function(){
 };
 
 console.log('HR Employee System Phase 6D-2 loaded: Employee Login + PIN + SPV Portal');
+/* ============================================================
+   PHASE 6C — EMPLOYEE PORTAL + APPROVAL TIM
+   Tambahkan DI PALING BAWAH app.js yang sedang dipakai.
+   Tidak mengganti modul HR/Admin yang sudah ada.
+   ============================================================ */
+
+(function () {
+  'use strict';
+
+  const EP6C = {
+    buttonId: 'ep6cApprovalNav',
+    originalContent: null,
+    busy: false
+  };
+
+  function ep6cEsc(v) {
+    if (typeof window.esc === 'function') return window.esc(v);
+    return String(v ?? '').replace(/[&<>'"]/g, c => ({
+      '&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'
+    }[c]));
+  }
+
+  function ep6cFmtDate(d) {
+    if (typeof window.fmtDate === 'function') return window.fmtDate(d);
+    return d ? new Date(d + 'T00:00:00').toLocaleDateString('id-ID') : '-';
+  }
+
+  function ep6cToast(msg, type) {
+    if (typeof window.toast === 'function') window.toast(msg, type);
+    else alert(msg);
+  }
+
+  function ep6cMyEmployeeId() {
+    return window.state?.profile?.employee_id || null;
+  }
+
+  function ep6cIsEmployeePortal() {
+    const id = ep6cMyEmployeeId();
+    if (!id) return false;
+
+    const text = document.body?.innerText || '';
+    return /Portal Karyawan/i.test(text);
+  }
+
+  function ep6cSidebar() {
+    return document.querySelector('.sidebar .nav')
+      || document.querySelector('.sidebar')
+      || document.querySelector('aside .nav')
+      || document.querySelector('aside');
+  }
+
+  function ep6cFindNavButton(labelRegex) {
+    return [...document.querySelectorAll('.sidebar button, aside button, .nav button')]
+      .find(b => labelRegex.test((b.textContent || '').trim()));
+  }
+
+  function ep6cInstallNav() {
+    if (!ep6cIsEmployeePortal()) return;
+
+    const nav = ep6cSidebar();
+    if (!nav) return;
+    if (document.getElementById(EP6C.buttonId)) return;
+
+    const btn = document.createElement('button');
+    btn.id = EP6C.buttonId;
+    btn.type = 'button';
+    btn.textContent = 'Approval Tim';
+    btn.style.cursor = 'pointer';
+    btn.addEventListener('click', () => ep6cRenderApproval());
+
+    const leaveBtn = ep6cFindNavButton(/Cuti\s*\/?\s*Izin/i);
+    if (leaveBtn && leaveBtn.parentElement === nav) {
+      nav.insertBefore(btn, leaveBtn.nextSibling);
+    } else {
+      nav.appendChild(btn);
+    }
+  }
+
+  async function ep6cLoadTeamRequests() {
+    const myId = ep6cMyEmployeeId();
+    if (!myId) return { team: [], requests: [] };
+
+    const teamQ = await window.sb
+      .from('employees')
+      .select('id,full_name,employee_number,supervisor_employee_id')
+      .eq('supervisor_employee_id', myId)
+      .eq('employment_status', 'active')
+      .order('full_name');
+
+    if (teamQ.error) throw teamQ.error;
+
+    const team = teamQ.data || [];
+    if (!team.length) return { team, requests: [] };
+
+    const ids = team.map(e => e.id);
+
+    const reqQ = await window.sb
+      .from('leave_requests')
+      .select(`
+        id,
+        employee_id,
+        leave_type_id,
+        start_date,
+        end_date,
+        total_days,
+        reason,
+        employee_note,
+        status,
+        supervisor_status,
+        supervisor_note,
+        submitted_at,
+        created_at,
+        employees(
+          full_name,
+          employee_number,
+          supervisor_employee_id
+        ),
+        leave_types(
+          name,
+          code
+        )
+      `)
+      .in('employee_id', ids)
+      .eq('status', 'pending')
+      .order('start_date', { ascending: false });
+
+    if (reqQ.error) throw reqQ.error;
+
+    return { team, requests: reqQ.data || [] };
+  }
+
+  function ep6cStatusBadge(status) {
+    if (status === 'approved') return '<span class="badge badge-green">Disetujui</span>';
+    if (status === 'rejected') return '<span class="badge badge-red">Ditolak</span>';
+    return '<span class="badge badge-yellow">Menunggu SPV</span>';
+  }
+
+  function ep6cRenderRows(requests) {
+    if (!requests.length) {
+      return `
+        <div class="card empty" style="padding:28px;text-align:center">
+          Tidak ada pengajuan yang menunggu approval Anda.
+        </div>
+      `;
+    }
+
+    return `
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Karyawan</th>
+              <th>Jenis</th>
+              <th>Periode</th>
+              <th>Hari</th>
+              <th>Alasan</th>
+              <th>Status</th>
+              <th>Aksi</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${requests.map(r => `
+              <tr>
+                <td>
+                  <b>${ep6cEsc(r.employees?.full_name || '-')}</b>
+                  <div class="muted">${ep6cEsc(r.employees?.employee_number || '')}</div>
+                </td>
+                <td>${ep6cEsc(r.leave_types?.name || '-')}</td>
+                <td>${ep6cFmtDate(r.start_date)} — ${ep6cFmtDate(r.end_date)}</td>
+                <td>${ep6cEsc(r.total_days ?? '-')}</td>
+                <td>${ep6cEsc(r.reason || r.employee_note || '-')}</td>
+                <td>${ep6cStatusBadge(r.status)}</td>
+                <td>
+                  <div class="row-actions">
+                    <button class="btn btn-light btn-sm"
+                      onclick="window.ep6cDetail('${ep6cEsc(r.id)}')">
+                      Detail
+                    </button>
+                    <button class="btn btn-primary btn-sm"
+                      onclick="window.ep6cApprove('${ep6cEsc(r.id)}','approved')">
+                      Setujui
+                    </button>
+                    <button class="btn btn-light btn-sm"
+                      onclick="window.ep6cApprove('${ep6cEsc(r.id)}','rejected')">
+                      Tolak
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  window.ep6cRenderApproval = async function () {
+    const content = document.querySelector('#content');
+    if (!content) return;
+
+    const myId = ep6cMyEmployeeId();
+    if (!myId) {
+      ep6cToast('Akun ini belum terhubung ke data karyawan.', 'error');
+      return;
+    }
+
+    content.innerHTML = `
+      <div class="section">
+        <div class="section-head">
+          <div>
+            <h2>Approval Tim</h2>
+            <div class="muted">Pengajuan cuti/izin dari karyawan yang menjadi bawahan Anda.</div>
+          </div>
+          <button class="btn btn-light" id="ep6cRefreshBtn">Refresh</button>
+        </div>
+        <div class="cards">
+          <div class="card">
+            <div class="muted">Menunggu Approval</div>
+            <div class="metric" id="ep6cPendingCount">...</div>
+          </div>
+          <div class="card">
+            <div class="muted">Tim Aktif</div>
+            <div class="metric" id="ep6cTeamCount">...</div>
+          </div>
+        </div>
+      </div>
+      <div class="section">
+        <div class="section-head"><h2>Pengajuan Menunggu Approval</h2></div>
+        <div id="ep6cApprovalBody" class="card empty">Memuat data...</div>
+      </div>
+    `;
+
+    document.getElementById('ep6cRefreshBtn')?.addEventListener('click', ep6cRenderApproval);
+
+    try {
+      const { team, requests } = await ep6cLoadTeamRequests();
+      const pc = document.getElementById('ep6cPendingCount');
+      const tc = document.getElementById('ep6cTeamCount');
+      const body = document.getElementById('ep6cApprovalBody');
+
+      if (pc) pc.textContent = requests.length;
+      if (tc) tc.textContent = team.length;
+      if (body) {
+        body.className = '';
+        body.innerHTML = ep6cRenderRows(requests);
+      }
+    } catch (e) {
+      console.error('Phase 6C Approval Tim:', e);
+      const body = document.getElementById('ep6cApprovalBody');
+      if (body) {
+        body.className = 'card empty';
+        body.innerHTML = `
+          <b>Gagal memuat Approval Tim.</b>
+          <div class="muted" style="margin-top:8px">${ep6cEsc(e?.message || String(e))}</div>
+        `;
+      }
+      ep6cToast('Approval Tim gagal dimuat. Periksa policy RLS yang disertakan bersama patch.', 'error');
+    }
+  };
+
+  window.ep6cDetail = async function (id) {
+    try {
+      const { data, error } = await window.sb
+        .from('leave_requests')
+        .select(`
+          *,
+          employees(
+            full_name,
+            employee_number,
+            supervisor_employee_id
+          ),
+          leave_types(name,code)
+        `)
+        .eq('id', id)
+        .single();
+
+      if (error) throw error;
+
+      const html = `
+        <div class="detail-grid">
+          <div class="detail-item">
+            <div class="muted">Karyawan</div>
+            <b>${ep6cEsc(data.employees?.full_name || '-')}</b>
+            <div class="muted">${ep6cEsc(data.employees?.employee_number || '')}</div>
+          </div>
+          <div class="detail-item">
+            <div class="muted">Jenis</div>
+            <div>${ep6cEsc(data.leave_types?.name || '-')}</div>
+          </div>
+          <div class="detail-item">
+            <div class="muted">Periode</div>
+            <div>${ep6cFmtDate(data.start_date)} — ${ep6cFmtDate(data.end_date)}</div>
+          </div>
+          <div class="detail-item">
+            <div class="muted">Jumlah</div>
+            <div>${ep6cEsc(data.total_days || '-')} hari</div>
+          </div>
+          <div class="detail-item">
+            <div class="muted">Status</div>
+            <div>${ep6cStatusBadge(data.status)}</div>
+          </div>
+        </div>
+        <div class="section" style="margin-top:18px">
+          <h3 class="sub-title">Alasan</h3>
+          <div class="info-box">${ep6cEsc(data.reason || data.employee_note || '-')}</div>
+        </div>
+      `;
+
+      if (typeof window.openModal === 'function') {
+        window.openModal('Detail Pengajuan', html, null, 'Tutup');
+      } else {
+        alert(
+          `Karyawan: ${data.employees?.full_name || '-'}\n` +
+          `Periode: ${data.start_date} - ${data.end_date}\n` +
+          `Alasan: ${data.reason || '-'}`
+        );
+      }
+    } catch (e) {
+      ep6cToast(e?.message || String(e), 'error');
+    }
+  };
+
+  window.ep6cApprove = async function (id, decision) {
+    if (EP6C.busy) return;
+
+    const myId = ep6cMyEmployeeId();
+    if (!myId) {
+      ep6cToast('Akun ini belum terhubung ke karyawan.', 'error');
+      return;
+    }
+
+    try {
+      EP6C.busy = true;
+
+      const current = await window.sb
+        .from('leave_requests')
+        .select(`
+          id,
+          employee_id,
+          status,
+          supervisor_status,
+          employees(
+            full_name,
+            employee_number,
+            supervisor_employee_id
+          )
+        `)
+        .eq('id', id)
+        .single();
+
+      if (current.error) throw current.error;
+
+      const r = current.data;
+
+      if (r.status !== 'pending') {
+        ep6cToast('Pengajuan ini sudah diproses atau tidak lagi menunggu SPV.', 'error');
+        await ep6cRenderApproval();
+        return;
+      }
+
+      if (r.employees?.supervisor_employee_id !== myId) {
+        ep6cToast('Anda bukan supervisor untuk karyawan ini.', 'error');
+        return;
+      }
+
+      if (decision === 'rejected') {
+        const note = prompt('Catatan penolakan SPV (opsional):') || null;
+
+        const q = await window.sb
+          .from('leave_requests')
+          .update({
+            supervisor_status: 'rejected',
+            status: 'rejected',
+            supervisor_note: note
+          })
+          .eq('id', id)
+          .eq('status', 'pending');
+
+        if (q.error) throw q.error;
+
+        const a = await window.sb.from('leave_approvals').insert({
+          leave_request_id: id,
+          approver_profile_id: window.state.profile.id,
+          approval_level: 'supervisor',
+          decision: 'rejected',
+          note
+        });
+
+        if (a.error) throw a.error;
+
+        ep6cToast('Pengajuan ditolak oleh SPV.');
+      } else {
+        const q = await window.sb
+          .from('leave_requests')
+          .update({
+            supervisor_status: 'approved',
+            status: 'supervisor_approved',
+            supervisor_approved_at: new Date().toISOString(),
+            supervisor_approved_by: window.state.profile.id
+          })
+          .eq('id', id)
+          .eq('status', 'pending');
+
+        if (q.error) throw q.error;
+
+        const a = await window.sb.from('leave_approvals').insert({
+          leave_request_id: id,
+          approver_profile_id: window.state.profile.id,
+          approval_level: 'supervisor',
+          decision: 'approved'
+        });
+
+        if (a.error) throw a.error;
+
+        ep6cToast('Pengajuan disetujui SPV dan diteruskan ke HR.');
+      }
+
+      await ep6cRenderApproval();
+    } catch (e) {
+      console.error('Phase 6C approval error:', e);
+      ep6cToast(
+        'Approval gagal: ' + (e?.message || String(e)) +
+        '. Jika muncul RLS/policy, jalankan SQL Phase 6C.',
+        'error'
+      );
+    } finally {
+      EP6C.busy = false;
+    }
+  };
+
+  /* Pasang tombol setiap kali portal dirender ulang. */
+  const observer = new MutationObserver(() => {
+    if (!EP6C.busy) ep6cInstallNav();
+  });
+
+  observer.observe(document.documentElement, { childList: true, subtree: true });
+
+  /* Coba langsung + beberapa saat setelah aplikasi selesai render. */
+  ep6cInstallNav();
+  setTimeout(ep6cInstallNav, 500);
+  setTimeout(ep6cInstallNav, 1500);
+  setTimeout(ep6cInstallNav, 3000);
+
+  console.log('Phase 6C loaded: Employee Portal + Approval Tim');
+})();
