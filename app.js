@@ -2941,13 +2941,24 @@ function cgOpenGenerator() {
     modal.querySelector('[name="cg_company_address"]').value = defaults.address;
     modal.querySelector('[name="cg_join_date"]').value = e.join_date || '';
 
+    // Auto-number every document type; amendment links to the latest PKWT.
+    const numberInput = modal.querySelector('[name="cg_number"]');
+    const prevNumber = modal.querySelector('[name="cg_previous_contract_number"]');
+    const prevStart = modal.querySelector('[name="cg_previous_start_date"]');
+    const prevEnd = modal.querySelector('[name="cg_previous_end_date"]');
+    const prevId = modal.querySelector('[name="cg_previous_contract_id"]');
+    const prevFields = [prevNumber, prevStart, prevEnd].filter(Boolean);
+    const showPrevious = typeSelect.value === 'amendment';
+    prevFields.forEach(el => { const wrap = el.closest('.field'); if (wrap) wrap.style.display = showPrevious ? '' : 'none'; });
+
     if (typeSelect.value === 'amendment') {
       const previous = cgLatestPreviousPkwt(e.id);
       modal.querySelector('[name="cg_previous_contract_id"]').value = previous?.id || '';
       modal.querySelector('[name="cg_previous_contract_number"]').value = previous?.contract_number || '';
       modal.querySelector('[name="cg_previous_start_date"]').value = previous?.start_date || '';
       modal.querySelector('[name="cg_previous_end_date"]').value = previous?.end_date || '';
-      modal.querySelector('[name="cg_number"]').value = previous?.contract_number || '';
+      // The amendment document number is the amendment label plus the referenced PKWT number.
+      modal.querySelector('[name="cg_number"]').value = previous?.contract_number ? (cgNextAmendmentLabel(e.id) + ' - ' + previous.contract_number) : cgNextAmendmentLabel(e.id);
       modal.querySelector('[name="cg_start_date"]').value = '';
       modal.querySelector('[name="cg_end_date"]').value = '';
       modal.querySelector('[name="cg_signed_date"]').value = '';
@@ -2956,6 +2967,7 @@ function cgOpenGenerator() {
       modal.querySelector('[name="cg_previous_contract_number"]').value = '';
       modal.querySelector('[name="cg_previous_start_date"]').value = '';
       modal.querySelector('[name="cg_previous_end_date"]').value = '';
+      if (numberInput) numberInput.value = cgNextContractNumber(e, typeSelect.value);
     }
   };
 
