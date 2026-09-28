@@ -187,9 +187,1129 @@ function employees() {
 }
 
 /* ---------- Kontrak / Cuti / Teguran (tidak berubah) ---------- */
+function contractStatusBadge(status) {
+  const map = {
+    draft: ['Draft', 'badge-gray'],
+    active: ['Aktif', 'badge-green'],
+    expired: ['Berakhir', 'badge-yellow'],
+    terminated: ['Dihentikan', 'badge-red'],
+    cancelled: ['Dibatalkan', 'badge-red']
+  };
+  const x = map[status] || [status || '-', 'badge-gray'];
+  return `<span class="badge ${x[1]}">${esc(x[0])}</span>`;
+}
+
+const contractTypeLabel = t => ({
+  pkwt: 'PKWT',
+  pkwtt: 'PKWTT',
+  offering_letter: 'Offering Letter',
+  amendment: 'Amandemen PKWT',
+  probation: 'Probation',
+  other: 'Lainnya'
+}[t] || t || '-');
+
+const moneyFmt = v =>
+  v == null || v === ''
+    ? '-'
+    : new Intl.NumberFormat('id-ID', {
+        style: 'currency',
+        currency: 'IDR',
+        maximumFractionDigits: 0
+      }).format(Number(v));
+
+function contractEmployeeOptions(current) {
+  return state.employees
+    .filter(e => e.employment_status === 'active' || e.id === current)
+    .sort((a, b) =>
+      String(a.full_name).localeCompare(String(b.full_name))
+    )
+    .map(e =>
+      `<option value="${esc(e.id)}" ${e.id === current ? 'selected' : ''}>
+        ${esc(e.full_name)} — ${esc(e.employee_number || '-')}
+      </option>`
+    )
+    .join('');
+}
+
+function contractLocationOptions(emp, rec) {
+  const branches = state.branches.filter(
+    b =>
+      b.company_id === emp?.company_id &&
+      (isActive(b) || b.id === rec?.branch_id)
+  );
+
+  const locations = state.workLocations.filter(
+    w =>
+      w.company_id === emp?.company_id &&
+      (isActive(w) || w.id === rec?.work_location_id)
+  );
+
+  const current = rec?.work_location_id
+    ? `work:${rec.work_location_id}`
+    : rec?.branch_id
+      ? `branch:${rec.branch_id}`
+      : '';
+
+  return {
+    html:
+      `<option value="">Tidak ditentukan</option>` +
+      branches
+        .map(
+          b =>
+            `<option value="branch:${esc(b.id)}"
+              ${current === 'branch:' + b.id ? 'selected' : ''}>
+              Outlet — ${esc(b.name)}
+            </option>`
+        )
+        .join('') +
+      locations
+        .map(
+          w =>
+            `<option value="work:${esc(w.id)}"
+              ${current === 'work:' + w.id ? 'selected' : ''}>
+              Lokasi kerja — ${esc(w.name)}
+            </option>`
+        )
+        .join(''),
+    branches,
+    locations
+  };
+}
+
+function contractDetailValue(label, value) {
+  return `<div class="detail-item">
+    <div class="muted">${label}</div>
+    <div>${value || '-'}</div>
+  </div>`;
+}
+
+async function contractOpenDocument(path) {
+  if (!path) return;
+
+  const { data, error } =
+    await sb.storage
+      .from('hr-documents')
+      .createSignedUrl(path, 300);
+
+  if (error || !data?.signedUrl) {
+    toast(
+      'Dokumen tidak dapat dibuka. Periksa izin bucket hr-documents.',
+      'error'
+    );
+    return;
+  }
+
+  window.open(
+    data.signedUrl,
+    '_blank',
+    'noopener,noreferrer'
+  );
+}
+
+window.contractForm = (id) => {
+  const rec = id
+    ? state.contracts.find(x => x.id === id)
+    : null;
+
+  if (id && !rec) {
+    toast('Data kontrak tidak ditemukan.', 'error');
+    return;
+  }
+
+  const emp = rec
+    ? state.employees.find(e => e.id === rec.employee_id)
+    : state.employees.find(
+        e => e.employment_status === 'active'
+      );
+
+  const currentEmployee =
+    rec?.employee_id || emp?.id || '';
+
+  const location =
+    contractLocationOptions(emp, rec);
+
+  const num = (
+    name,
+    label,
+    value,
+    step = '1'
+  ) =>
+    `<div class="field">
+      <label>${label}</label>
+      <input
+        name="${name}"
+        type="number"
+        min="0"
+        step="${step}"
+        inputmode="decimal"
+        value="${esc(value ?? '')}">
+    </div>`;
+
+  const date = (
+    name,
+    label,
+    value,
+    required = false
+  ) =>
+    `<div class="field">
+      <label>
+        ${label}${required ? ' *' : ''}
+      </label>
+      <input
+        name="${name}"
+        type="date"
+        ${required ? 'required' : ''}
+        value="${esc(value || '')}">
+    </div>`;
+
+  const body = `
+    <div class="modal-grid">
+
+      <div class="field field-full">
+        <label>Karyawan *</label>
+        <select name="employee_id" required>
+          <option value="">Pilih karyawan</option>
+          ${contractEmployeeOptions(currentEmployee)}
+        </select>
+      </div>
+
+      <div class="field">
+        <label>Jenis Dokumen *</label>
+        <select name="contract_type" required>
+          <option value="">Pilih jenis</option>
+          <option value="pkwt"
+            ${rec?.contract_type === 'pkwt' ? 'selected' : ''}>
+            PKWT
+          </option>
+          <option value="pkwtt"
+            ${rec?.contract_type === 'pkwtt' ? 'selected' : ''}>
+            PKWTT
+          </option>
+          <option value="offering_letter"
+            ${rec?.contract_type === 'offering_letter' ? 'selected' : ''}>
+            Offering Letter
+          </option>
+          <option value="amendment"
+            ${rec?.contract_type === 'amendment' ? 'selected' : ''}>
+            Amandemen PKWT
+          </option>
+          <option value="probation"
+            ${rec?.contract_type === 'probation' ? 'selected' : ''}>
+            Probation
+          </option>
+          <option value="other"
+            ${rec?.contract_type === 'other' ? 'selected' : ''}>
+            Lainnya
+          </option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label>No. Kontrak / Dokumen</label>
+        <input
+          name="contract_number"
+          value="${esc(rec?.contract_number || '')}"
+          placeholder="Contoh: PKWT/001/IX/2026">
+      </div>
+
+      <div class="field">
+        <label>Status</label>
+        <select name="status">
+          <option value="draft"
+            ${rec?.status === 'draft' ? 'selected' : ''}>
+            Draft
+          </option>
+          <option value="active"
+            ${!rec || rec?.status === 'active' ? 'selected' : ''}>
+            Aktif
+          </option>
+          <option value="expired"
+            ${rec?.status === 'expired' ? 'selected' : ''}>
+            Berakhir
+          </option>
+          <option value="terminated"
+            ${rec?.status === 'terminated' ? 'selected' : ''}>
+            Dihentikan
+          </option>
+          <option value="cancelled"
+            ${rec?.status === 'cancelled' ? 'selected' : ''}>
+            Dibatalkan
+          </option>
+        </select>
+      </div>
+
+      <div class="field field-full">
+        <div class="sub-title" style="margin:8px 0 0">
+          Periode & Tanggal
+        </div>
+      </div>
+
+      ${date(
+        'join_date',
+        'Tanggal Bergabung',
+        rec?.join_date
+      )}
+
+      ${date(
+        'start_date',
+        'Tanggal Mulai',
+        rec?.start_date,
+        true
+      )}
+
+      ${date(
+        'end_date',
+        'Tanggal Berakhir',
+        rec?.end_date
+      )}
+
+      ${date(
+        'signed_date',
+        'Tanggal Tanda Tangan',
+        rec?.signed_date
+      )}
+
+      ${num(
+        'probation_days',
+        'Masa Probation (hari)',
+        rec?.probation_days
+      )}
+
+      <div class="field field-full">
+        <div class="sub-title" style="margin:8px 0 0">
+          Posisi & Lokasi
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Departemen</label>
+        <select name="department_id"></select>
+      </div>
+
+      <div class="field">
+        <label>Jabatan</label>
+        <select name="position_id"></select>
+      </div>
+
+      <div class="field field-full">
+        <label>Outlet / Lokasi Kerja</label>
+        <select name="location_ref">
+          ${location.html}
+        </select>
+      </div>
+
+      <div class="field field-full">
+        <div class="sub-title" style="margin:8px 0 0">
+          Remunerasi
+        </div>
+      </div>
+
+      ${num('base_salary', 'Gaji Pokok')}
+      ${num('position_allowance', 'Tunjangan Jabatan')}
+      ${num('performance_incentive', 'Insentif Kinerja')}
+      ${num('discipline_allowance', 'Tunjangan Kedisiplinan')}
+      ${num('meal_allowance', 'Tunjangan Makan')}
+      ${num('thr_amount', 'THR')}
+
+      <div class="field field-full">
+        <div class="sub-title" style="margin:8px 0 0">
+          Amandemen PKWT
+        </div>
+        <div class="muted">
+          Jika bukan amandemen, bagian ini boleh dikosongkan.
+          Periode baru menggunakan Tanggal Mulai/Berakhir di atas.
+        </div>
+      </div>
+
+      <div class="field field-full">
+        <label>Kontrak Sebelumnya</label>
+        <select name="previous_contract_id">
+          <option value="">Tidak ada</option>
+          ${state.contracts
+            .filter(
+              c =>
+                c.id !== rec?.id &&
+                c.employee_id === currentEmployee
+            )
+            .map(
+              c =>
+                `<option
+                  value="${esc(c.id)}"
+                  ${rec?.previous_contract_id === c.id ? 'selected' : ''}>
+                  ${esc(
+                    c.contract_number ||
+                    contractTypeLabel(c.contract_type)
+                  )}
+                  — ${fmtDate(c.start_date)}
+                  s/d ${fmtDate(c.end_date)}
+                </option>`
+            )
+            .join('')}
+        </select>
+      </div>
+
+      ${date(
+        'previous_start_date',
+        'Periode Sebelumnya — Mulai',
+        rec?.previous_start_date
+      )}
+
+      ${date(
+        'previous_end_date',
+        'Periode Sebelumnya — Berakhir',
+        rec?.previous_end_date
+      )}
+
+      <div class="field field-full">
+        <label>Upload Dokumen Kontrak</label>
+        <input
+          name="contract_file"
+          type="file"
+          accept=".pdf,.doc,.docx,.jpg,.jpeg,.png">
+      </div>
+
+      <div class="field field-full">
+        ${
+          rec?.document_path
+            ? `<div class="info-box">
+                Dokumen tersimpan:
+                <button
+                  type="button"
+                  class="btn btn-light btn-sm"
+                  id="openContractDoc">
+                  Buka dokumen
+                </button>
+              </div>`
+            : `<div class="muted">
+                Belum ada dokumen yang diunggah.
+              </div>`
+        }
+      </div>
+
+      <div class="field field-full">
+        <label>Catatan HR</label>
+        <textarea
+          name="notes"
+          rows="3"
+          placeholder="Catatan tambahan HR...">${esc(
+            rec?.notes || ''
+          )}</textarea>
+      </div>
+
+    </div>
+  `;
+
+  const modal = openModal(
+    rec ? 'Edit Kontrak' : 'Tambah Kontrak',
+    body,
+    async form => {
+
+      const fd = new FormData(form);
+
+      const employee_id =
+        fd.get('employee_id') || '';
+
+      const contract_type =
+        fd.get('contract_type') || '';
+
+      const start_date =
+        fd.get('start_date') || '';
+
+      const end_date =
+        fd.get('end_date') || null;
+
+      if (
+        !employee_id ||
+        !contract_type ||
+        !start_date
+      ) {
+        toast(
+          'Lengkapi Karyawan, Jenis Dokumen, dan Tanggal Mulai.',
+          'error'
+        );
+        return false;
+      }
+
+      if (
+        end_date &&
+        end_date < start_date
+      ) {
+        toast(
+          'Tanggal berakhir tidak boleh lebih kecil dari tanggal mulai.',
+          'error'
+        );
+        return false;
+      }
+
+      const clean = v =>
+        String(v ?? '').trim() || null;
+
+      const money = name => {
+        const v = clean(fd.get(name));
+
+        if (v === null) return null;
+
+        const n = Number(v);
+
+        return Number.isFinite(n)
+          ? n
+          : null;
+      };
+
+      const intVal = name => {
+        const v = clean(fd.get(name));
+
+        if (v === null) return null;
+
+        const n = Number(v);
+
+        return Number.isInteger(n) && n >= 0
+          ? n
+          : null;
+      };
+
+      const loc =
+        clean(fd.get('location_ref'));
+
+      const branch_id =
+        loc?.startsWith('branch:')
+          ? loc.slice(7)
+          : null;
+
+      const work_location_id =
+        loc?.startsWith('work:')
+          ? loc.slice(5)
+          : null;
+
+      const payload = {
+        employee_id,
+        contract_type,
+
+        contract_number:
+          clean(fd.get('contract_number')),
+
+        status:
+          clean(fd.get('status')) || 'active',
+
+        join_date:
+          clean(fd.get('join_date')),
+
+        start_date,
+
+        end_date,
+
+        signed_date:
+          clean(fd.get('signed_date')),
+
+        probation_days:
+          intVal('probation_days'),
+
+        department_id:
+          clean(fd.get('department_id')),
+
+        position_id:
+          clean(fd.get('position_id')),
+
+        branch_id,
+
+        work_location_id,
+
+        base_salary:
+          money('base_salary'),
+
+        position_allowance:
+          money('position_allowance'),
+
+        performance_incentive:
+          money('performance_incentive'),
+
+        discipline_allowance:
+          money('discipline_allowance'),
+
+        meal_allowance:
+          money('meal_allowance'),
+
+        thr_amount:
+          money('thr_amount'),
+
+        previous_contract_id:
+          clean(fd.get('previous_contract_id')),
+
+        previous_start_date:
+          clean(fd.get('previous_start_date')),
+
+        previous_end_date:
+          clean(fd.get('previous_end_date')),
+
+        document_path:
+          rec?.document_path || null,
+
+        notes:
+          clean(fd.get('notes'))
+      };
+
+      if (
+        payload.contract_type === 'amendment' &&
+        !payload.previous_contract_id &&
+        !payload.previous_start_date &&
+        !payload.previous_end_date
+      ) {
+        toast(
+          'Untuk Amandemen PKWT, isi minimal kontrak atau periode sebelumnya.',
+          'error'
+        );
+        return false;
+      }
+
+      const file =
+        fd.get('contract_file');
+
+      if (file && file.size) {
+
+        if (
+          file.size >
+          10 * 1024 * 1024
+        ) {
+          toast(
+            'Ukuran dokumen maksimal 10 MB.',
+            'error'
+          );
+          return false;
+        }
+
+        const safe =
+          String(file.name || 'dokumen')
+            .replace(
+              /[^a-zA-Z0-9._-]+/g,
+              '_'
+            );
+
+        const path =
+          `contracts/${employee_id}/${new Date().getFullYear()}/${Date.now()}-${safe}`;
+
+        const up =
+          await sb.storage
+            .from('hr-documents')
+            .upload(
+              path,
+              file,
+              {
+                upsert: false,
+                contentType:
+                  file.type ||
+                  'application/octet-stream'
+              }
+            );
+
+        if (up.error) {
+          toast(
+            /row-level security|policy|unauthorized/i.test(
+              up.error.message || ''
+            )
+              ? 'Upload ditolak oleh policy Storage hr-documents.'
+              : 'Gagal upload dokumen: ' +
+                  up.error.message,
+            'error'
+          );
+
+          return false;
+        }
+
+        payload.document_path =
+          path;
+      }
+
+      let res = rec
+        ? await sb
+            .from('contracts')
+            .update(payload)
+            .eq('id', rec.id)
+            .select()
+        : await sb
+            .from('contracts')
+            .insert(payload)
+            .select();
+
+      if (
+        res.error &&
+        /column .* does not exist|schema cache|PGRST204/i.test(
+          res.error.message || ''
+        )
+      ) {
+
+        const core = {
+          employee_id,
+          contract_type,
+          contract_number:
+            payload.contract_number,
+          status:
+            payload.status,
+          start_date,
+          end_date,
+          signed_date:
+            payload.signed_date,
+          notes:
+            payload.notes,
+          document_path:
+            payload.document_path
+        };
+
+        res = rec
+          ? await sb
+              .from('contracts')
+              .update(core)
+              .eq('id', rec.id)
+              .select()
+          : await sb
+              .from('contracts')
+              .insert(core)
+              .select();
+
+        if (!res.error) {
+          toast(
+            'Kontrak tersimpan, tetapi beberapa field tambahan belum tersedia di database. Jalankan migration Phase 4B-2 terbaru.'
+          );
+        }
+      }
+
+      if (res.error) {
+        toast(
+          friendlyError(res.error),
+          'error'
+        );
+        return false;
+      }
+
+      if (!res.data?.length) {
+        toast(
+          PERMISSION_MSG,
+          'error'
+        );
+        return false;
+      }
+
+      toast(
+        `Kontrak "${
+          payload.contract_number ||
+          contractTypeLabel(
+            payload.contract_type
+          )
+        }" berhasil ${
+          rec
+            ? 'diperbarui'
+            : 'ditambahkan'
+        }.`
+      );
+
+      return true;
+    }
+  );
+
+  const sel = n =>
+    modal.querySelector(
+      `[name="${n}"]`
+    );
+
+  const fill = (
+    name,
+    items,
+    placeholder,
+    current
+  ) => {
+
+    const el = sel(name);
+
+    el.innerHTML =
+      `<option value="">
+        ${placeholder}
+      </option>` +
+      items
+        .map(
+          x =>
+            `<option
+              value="${esc(x.id)}"
+              ${
+                current === x.id
+                  ? 'selected'
+                  : ''
+              }>
+              ${esc(x.name)}
+              ${
+                isActive(x)
+                  ? ''
+                  : ' (nonaktif)'
+              }
+            </option>`
+        )
+        .join('');
+  };
+
+  const refresh = () => {
+
+    const employeeId =
+      sel('employee_id').value;
+
+    const employee =
+      state.employees.find(
+        e => e.id === employeeId
+      );
+
+    const cid =
+      employee?.company_id;
+
+    const depts =
+      state.departments.filter(
+        d =>
+          (
+            isActive(d) &&
+            (
+              d.company_id === cid ||
+              !d.company_id
+            )
+          ) ||
+          d.id === rec?.department_id
+      );
+
+    const poss =
+      state.positions.filter(
+        p =>
+          (
+            isActive(p) &&
+            (
+              p.company_id === cid ||
+              !p.company_id
+            )
+          ) ||
+          p.id === rec?.position_id
+      );
+
+    fill(
+      'department_id',
+      cid ? depts : [],
+      cid
+        ? 'Pilih departemen'
+        : 'Pilih karyawan dulu',
+      rec?.department_id
+    );
+
+    fill(
+      'position_id',
+      cid ? poss : [],
+      cid
+        ? 'Pilih jabatan'
+        : 'Pilih karyawan dulu',
+      rec?.position_id
+    );
+
+    sel('department_id').disabled =
+      sel('position_id').disabled =
+        !cid;
+  };
+
+  sel('employee_id').onchange =
+    refresh;
+
+  refresh();
+
+  const openBtn =
+    modal.querySelector(
+      '#openContractDoc'
+    );
+
+  if (openBtn) {
+    openBtn.onclick = () =>
+      contractOpenDocument(
+        rec.document_path
+      );
+  }
+};
+
 function contracts() {
-  const rows = state.contracts;
-  $('#content').innerHTML = `<div class="section"><div class="section-head"><h2>Daftar Kontrak</h2></div>${rows.length ? `<div class="table-wrap"><table class="table"><thead><tr><th>Karyawan</th><th>No. Kontrak</th><th>Jenis</th><th>Mulai</th><th>Berakhir</th><th>Status</th></tr></thead><tbody>${rows.map(c => { const n = daysUntil(c.end_date); let cls = n !== null && n <= 30 ? 'badge-red' : 'badge-green'; return `<tr><td>${esc(state.employees.find(e => e.id === c.employee_id)?.full_name || '-')}</td><td>${esc(c.contract_number || '-')}</td><td>${esc(c.contract_type)}</td><td>${fmtDate(c.start_date)}</td><td>${fmtDate(c.end_date)} ${n !== null ? `<span class="badge ${cls}">${n < 0 ? 'Lewat' : n + ' hari'}</span>` : ''}</td><td>${esc(c.status)}</td></tr>`; }).join('')}</tbody></table></div>` : '<div class="card empty">Belum ada kontrak.</div>'}</div>`;
+
+  const rows =
+    state.contracts;
+
+  const today =
+    todayJakarta();
+
+  const expSoon = c => {
+
+    const n =
+      daysUntil(c.end_date);
+
+    return (
+      c.status === 'active' &&
+      n !== null &&
+      n >= 0 &&
+      n <= 30
+    );
+  };
+
+  $('#content').innerHTML = `
+    <div class="section">
+
+      <div class="section-head">
+
+        <div>
+          <h2>Daftar Kontrak</h2>
+
+          <div class="muted">
+            ${rows.length}
+            dokumen kontrak tersimpan
+          </div>
+        </div>
+
+        <button
+          class="btn btn-primary"
+          onclick="contractForm()">
+          + Tambah Kontrak
+        </button>
+
+      </div>
+
+      <div
+        class="cards"
+        style="margin-bottom:14px">
+
+        <div class="card">
+          <div class="muted">
+            Aktif
+          </div>
+          <div class="metric">
+            ${
+              rows.filter(
+                c =>
+                  c.status === 'active'
+              ).length
+            }
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="muted">
+            Berakhir ≤ 30 Hari
+          </div>
+          <div class="metric">
+            ${
+              rows.filter(
+                expSoon
+              ).length
+            }
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="muted">
+            Sudah Berakhir
+          </div>
+          <div class="metric">
+            ${
+              rows.filter(
+                c =>
+                  c.end_date &&
+                  c.end_date < today
+              ).length
+            }
+          </div>
+        </div>
+
+      </div>
+
+      ${
+        rows.length
+          ? `
+            <div class="table-wrap">
+              <table class="table">
+
+                <thead>
+                  <tr>
+                    <th>Karyawan</th>
+                    <th>No. Dokumen</th>
+                    <th>Jenis</th>
+                    <th>Mulai</th>
+                    <th>Berakhir</th>
+                    <th>Remunerasi</th>
+                    <th>Status</th>
+                    <th>Aksi</th>
+                  </tr>
+                </thead>
+
+                <tbody>
+
+                  ${rows
+                    .map(c => {
+
+                      const e =
+                        state.employees.find(
+                          x =>
+                            x.id ===
+                            c.employee_id
+                        );
+
+                      const n =
+                        daysUntil(
+                          c.end_date
+                        );
+
+                      const loc =
+                        c.work_location_id
+                          ? (
+                              state.workLocations.find(
+                                w =>
+                                  w.id ===
+                                  c.work_location_id
+                              )?.name ||
+                              '-'
+                            )
+                          : c.branch_id
+                            ? (
+                                state.branches.find(
+                                  b =>
+                                    b.id ===
+                                    c.branch_id
+                                )?.name ||
+                                '-'
+                              )
+                            : '-';
+
+                      return `
+                        <tr>
+
+                          <td>
+                            <b>
+                              ${esc(
+                                e?.full_name ||
+                                '-'
+                              )}
+                            </b>
+
+                            <div class="muted">
+                              ${esc(
+                                e?.employee_number ||
+                                ''
+                              )}
+                            </div>
+                          </td>
+
+                          <td>
+                            ${esc(
+                              c.contract_number ||
+                              '-'
+                            )}
+                          </td>
+
+                          <td>
+                            ${esc(
+                              contractTypeLabel(
+                                c.contract_type
+                              )
+                            )}
+                          </td>
+
+                          <td>
+                            ${fmtDate(
+                              c.start_date
+                            )}
+                          </td>
+
+                          <td>
+                            ${fmtDate(
+                              c.end_date
+                            )}
+
+                            ${
+                              n !== null
+                                ? `
+                                  <span
+                                    class="badge ${
+                                      n < 0
+                                        ? 'badge-red'
+                                        : n <= 30
+                                          ? 'badge-yellow'
+                                          : 'badge-green'
+                                    }">
+                                    ${
+                                      n < 0
+                                        ? 'Lewat'
+                                        : n +
+                                          ' hari'
+                                    }
+                                  </span>
+                                `
+                                : ''
+                            }
+
+                          </td>
+
+                          <td>
+                            <div>
+                              ${moneyFmt(
+                                c.base_salary
+                              )}
+                            </div>
+
+                            <div class="muted">
+                              ${esc(loc)}
+                            </div>
+                          </td>
+
+                          <td>
+                            ${contractStatusBadge(
+                              c.status
+                            )}
+                          </td>
+
+                          <td>
+                            <div class="row-actions">
+
+                              <button
+                                class="btn btn-light btn-sm"
+                                onclick="contractForm('${esc(
+                                  c.id
+                                )}')">
+                                Edit
+                              </button>
+
+                              ${
+                                c.document_path
+                                  ? `
+                                    <button
+                                      class="btn btn-light btn-sm"
+                                      onclick="contractOpenDocument('${esc(
+                                        c.document_path
+                                      )}')">
+                                      Dokumen
+                                    </button>
+                                  `
+                                  : ''
+                              }
+
+                            </div>
+                          </td>
+
+                        </tr>
+                      `;
+
+                    })
+                    .join('')}
+
+                </tbody>
+
+              </table>
+            </div>
+          `
+          : `
+            <div class="card empty">
+              Belum ada kontrak.
+              Klik
+              <b>+ Tambah Kontrak</b>
+              untuk memasukkan dokumen pertama.
+            </div>
+          `
+      }
+
+    </div>
+  `;
 }
 function leave() {
   const rows = state.leave;
