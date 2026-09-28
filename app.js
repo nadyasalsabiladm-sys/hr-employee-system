@@ -2012,81 +2012,149 @@ function cgPkwtHtml(d) {
 
 function cgPkwttHtml(d) {
   const companyAddress = d.companyAddress || '';
+  const employeeName = d.employee?.full_name || '';
+  const employeeId = d.employee?.employee_number || '-';
+  const employeeAddress = d.employee?.address || '-';
+  const birthInfo = d.employee?.birth_place || d.employee?.birth_date
+    ? `${d.employee?.birth_place || '-'}${d.employee?.birth_date ? ', ' + cgDate(d.employee.birth_date) : ''}`
+    : '-';
 
   return `
     <div class="cg-doc">
       <h1>PERJANJIAN KERJA WAKTU TIDAK TERTENTU</h1>
       <p class="center">No. ${cgEsc(d.number || '[NOMOR DOKUMEN]')}</p>
 
-      <p>Pada hari ini, tanggal <b>${cgDate(d.signedDate)}</b>, di kantor
+      <p>Pada hari ini, tanggal <b>${cgDate(d.signedDate)}</b> di kantor
       <b>${cgEsc(d.company)}</b>, yang bertanda tangan di bawah ini:</p>
 
-      <p><b>PIHAK PERTAMA</b><br>
-      Nama : ${cgEsc(d.representative)}<br>
-      Pekerjaan/Jabatan : ${cgEsc(d.representativeTitle)}<br>
+      <p><b>Nama : ${cgEsc(d.representative)}</b><br>
+      Pekerjaan : ${cgEsc(d.representativeTitle)}<br>
       Alamat : ${cgEsc(companyAddress)}</p>
 
-      <p><b>PIHAK KEDUA</b><br>
-      Nama : ${cgEsc(d.employee?.full_name || '')}<br>
-      ID Karyawan : ${cgEsc(d.employee?.employee_number || '-')}<br>
-      Alamat : ${cgEsc(d.employee?.address || '-')}</p>
+      <p>Dalam hal ini bertindak untuk dan atas nama
+      <b>${cgEsc(d.company)}</b>, yang berkedudukan di
+      ${cgEsc(companyAddress)}, dan untuk selanjutnya disebut sebagai
+      PIHAK PERTAMA.</p>
 
-      <p>Kedua belah pihak sepakat untuk mengadakan perjanjian kerja waktu
-      tidak tertentu dengan syarat-syarat dan ketentuan sebagai berikut:</p>
+      <p><b>Nama : ${cgEsc(employeeName)}</b><br>
+      Tempat/tanggal lahir : ${cgEsc(birthInfo)}<br>
+      Alamat : ${cgEsc(employeeAddress)}<br>
+      ID Karyawan : ${cgEsc(employeeId)}</p>
 
-      <h2>PASAL 1 — KETENTUAN KHUSUS</h2>
+      <p>Untuk selanjutnya dalam hal ini disebut sebagai PIHAK KEDUA.</p>
+
+      <p>Dalam hal ini kedua belah pihak menerangkan terlebih dahulu antara lain:</p>
+
+      <p>Pihak Pertama dalam rangka menjalankan kegiatan usahanya tersebut bermaksud untuk
+      mempekerjakan Pihak Kedua berdasarkan Perjanjian Kerja Untuk Waktu Tidak Tertentu (PKWTT)
+      sebagaimana yang akan diatur dalam perjanjian ini, dan Pihak Kedua telah sepakat untuk bekerja
+      berdasarkan Perjanjian Kerja Waktu Tidak Tertentu tersebut bagi Pihak Pertama.</p>
+
+      <p>Sehubungan dengan hal tersebut di atas, maka kedua belah pihak setuju dan sepakat untuk
+      mengadakan perjanjian kerja waktu tidak tertentu dengan syarat-syarat dan ketentuan sebagai
+      berikut :</p>
+
+      <h2>PASAL 1</h2>
+      <h3>KETENTUAN KHUSUS</h3>
       <ol>
-        <li>Status: Karyawan PKWTT.</li>
-        <li>Jabatan: ${cgEsc(d.position)}.</li>
-        <li>Tgl Masuk: ${cgDate(d.joinDate)}.</li>
+        <li>Status : Karyawan PKWTT</li>
+        <li>Jabatan : ${cgEsc(d.position)}</li>
+        <li>Tgl Masuk : ${cgDate(d.joinDate)}</li>
       </ol>
 
-      <h2>PASAL 2 — KEPEGAWAIAN</h2>
-      <p>Pihak Kedua bersedia ditempatkan sesuai kebutuhan organisasi Pihak
-      Pertama. Waktu kerja disesuaikan dengan waktu kerja yang ditetapkan
-      Pihak Pertama sesuai jabatan, jenis pekerjaan dan lokasi penempatan.</p>
-
-      <h2>PASAL 3 — KEWAJIBAN DAN TANGGUNG-JAWAB KARYAWAN</h2>
+      <h2>PASAL 2</h2>
+      <h3>KEPEGAWAIAN</h3>
       <ol>
-        <li>Melaksanakan seluruh kewajiban berdasarkan tugas dan tanggung jawab
-        jabatan serta mematuhi peraturan kerja perusahaan.</li>
-        <li>Menjaga kerahasiaan perusahaan dan rahasia jabatan.</li>
-        <li>Mematuhi ketentuan jam kerja yang berlaku.</li>
-        <li>Memberitahukan pengunduran diri sesuai prosedur perusahaan.</li>
+        <li>Pihak Kedua bersedia untuk ditempatkan dimana saja diseluruh wilayah Indonesia di unit
+        organisasi Pihak Pertama.</li>
+        <li>Waktu Kerja disesuaikan dengan waktu kerja yang ditetapkan oleh Pihak Pertama, sesuai
+        dengan Jabatan, Jenis Pekerjaan, dan lokasi penempatan.</li>
+        <li>Masa Kerja dihitung sejak ditandatangani perjanjian kerja ini beserta terbitnya Surat Keputusan
+        pengangkatan karyawan tetap dari Pihak Pertama.</li>
       </ol>
 
-      <h2>PASAL 4 — KEWAJIBAN DAN TANGGUNG JAWAB PERUSAHAAN</h2>
+      <h2>PASAL 3</h2>
+      <h3>KEWAJIBAN DAN TANGGUNG-JAWAB KARYAWAN</h3>
       <ol>
-        <li>Memberikan upah berdasarkan ketentuan yang disepakati.</li>
-        <li>Memperhatikan kesejahteraan dan keselamatan kerja.</li>
-        <li>Mengembangkan potensi karyawan sesuai kemampuan dan kondisi
-        perusahaan.</li>
-        <li>Melaksanakan peraturan ketenagakerjaan sesuai ketentuan yang berlaku.</li>
+        <li>Pihak Kedua wajib melaksanakan segala kewajiban yang ditugaskan kepadanya, dari waktu ke
+        waktu, berdasarkan tugas dan tanggung-jawab Jabatan yang diberikan oleh Pihak Pertama,
+        dengan setiap saat memperhatikan, mematuhi dan mentaati Peraturan Kerja, Surat-Surat
+        Keputusan Direksi serta aturan dan keputusan lainnya yang ditetapkan oleh Pihak Pertama.</li>
+        <li>Selama Pihak Kedua masih bekerja pada Pihak Pertama, Pihak Kedua dilarang untuk
+        melakukan pekerjaan-pekerjaan diluar daripada Pihak Pertama, bekerja untuk pihak ketiga,
+        menerima beasiswa dari atau terikat ikatan dinas dengan badan usaha, instansi, atau perorangan
+        lainnya.</li>
+        <li>Jam kerja resmi ditentukan sebagai berikut:
+          <ol type="a">
+            <li>Senin s/d Jumat : dari jam 08.00 s/d 17.00 dan</li>
+            <li>Sabtu : dari jam 08.00 s/d 15:00 waktu setempat.</li>
+            <li>Istirahat makan siang adalah satu jam dari jam 12.00 s/d 13.00 waktu setempat</li>
+            <li>Waktu potongan absensi adalah 08:01 dengan potongan maksimal Rp. 20.000,00</li>
+          </ol>
+        </li>
+        <li>Pihak Kedua memahami bahwa rahasia perusahaan dan rahasia jabatan merupakan hal yang
+        penting bagi PERUSAHAAN dan Pihak Pertama sama sekali tidak mentoleransi pelanggaran
+        atas ketentuan ini.</li>
+        <li>Penemuan-penemuan yang diperoleh Pihak Kedua dalam pelaksanaan tugas dan kewajibannya
+        selaku karyawan perusahaan termasuk tetapi tidak terbatas didalamnya ide-ide, rumusan-rumusan,
+        formula-formula maupun konsep-konsep menjadi hak milik intelektual Pihak Pertama.</li>
+        <li>Prosedur pengunduran diri karyawan wajib memberitahukan secara tertulis baik ke atasan maupun
+        ke bagian personalia atau Human Resource Departemen &amp; General Affair dengan batas waktu
+        paling lambat 60 hari sebelum tanggal pengunduran diri.</li>
+        <li>Pelanggaran atas ketentuan dalam Pasal ini atau pelanggaran salah satu ketentuan sebagaimana
+        diuraikan dalam Peraturan Perusahaan, merupakan salah satu dasar bagi Pihak Pertama untuk
+        mengakhiri hubungan kerja dengan Pihak Kedua dan atau melakukan penuntutan secara hukum
+        kepada Pihak Kedua sesuai dengan ketentuan dan perundang-undangan yang berlaku.</li>
+        <li>Perbuatan atau tindakan Pihak kedua yang merupakan kesalahan berat, Pihak kedua melanggar
+        Undang-Undang Ketenagakerjaan/Peraturan Ketenagakerjaan yang berlaku, serta melanggar
+        ketentuan Peraturan Pihak Pertama serta perintah atasan baik lisan maupun tulisan. Yang termasuk
+        tindakan kesalahan berat itu adalah sebagai berikut:
+          <ol type="a">
+            <li>Mencuri, menggelapkan, menipu atau melakukan kejahatan lainnya, baik yang menyangkut kepentingan Perusahaan maupun pihak lain ; atau</li>
+            <li>Memberikan keterangan palsu atau dipalsukan kepada Perusahaan yang dijadikan dasar oleh Perusahaan dalam membuat Perjanjian Kerja ini; atau</li>
+            <li>Memberikan keterangan palsu atau dipalsukan kepada sehingga merugikan Perusahaan atau kepentingan negara ; atau</li>
+            <li>Mabuk, minum minuman keras yang memabukkan, madat, memakai obat bius atau menyalahgunakan obat-obat terlarang ataupun obat perangsang lainnya yang dilarang oleh peraturan perundang-undangan, ditempat kerja, dan ditempat-tempat yang ditetapkan Pihak Pertama; atau</li>
+            <li>Melakukan perbuatan asusila atau melakukan perjudian ditempat kerja; atau</li>
+            <li>Menyerang, mengintimidasi atau menipu pengusaha atau teman sekerja dan memperdagangkan barang terlarang baik dalam lingkungan kerja maupun di luar lingkungan kerja; atau</li>
+            <li>Menganiaya, mengancam secara fisik dan mental, menghina secara kasar pimpinan atau pegawai perusahaan; atau</li>
+            <li>Membujuk pimpinan, teman sekerja atau pegawai perusahaan untuk melakukan sesuatu yang bertentangan dengan hukum atau kesusilaan serta perundangan yang berlaku; atau</li>
+            <li>Membongkar atau membocorkan rahasia perusahaan atau mencemarkan nama baik perusahaan yang seharusnya dirahasiakan kecuali untuk kepentingan negara atau dengan sengaja atau kecerobohannya merusak atau membiarkan barang-barang atau dokumen-dokumen milik atau yang berada dalam pengusaan perusahaan sehingga terancam bahaya; atau</li>
+            <li>Dengan sengaja walaupun sudah diperingatkan membiarkan dirinya atau teman sekerjanya dalam keadaan bahaya; dan</li>
+            <li>Hal-hal lain yang diatur dalam peraturan perusahaan</li>
+          </ol>
+        </li>
       </ol>
 
-      <p><b>Rincian remunerasi:</b></p>
-      <table>
-        <tr><td>Gaji Pokok</td><td>${cgMoney(d.baseSalary)}</td></tr>
-        <tr><td>Tunjangan Jabatan</td><td>${cgMoney(d.positionAllowance)}</td></tr>
-        <tr><td>Insentif Kinerja</td><td>${cgMoney(d.performance)}</td></tr>
-        <tr><td>Tunjangan Kedisiplinan</td><td>${cgMoney(d.discipline)}</td></tr>
-        <tr><td>Tunjangan Makan</td><td>${cgMoney(d.meal)}</td></tr>
-        <tr><td>THR</td><td>${cgMoney(d.thr)}</td></tr>
-      </table>
+      <h2>PASAL 4</h2>
+      <h3>KEWAJIBAN DAN TANGGUNG JAWAB PERUSAHAAN</h3>
+      <ol>
+        <li>Memberikan Upah berdasarkan ketentuan Pihak Pertama yang disepakati.</li>
+        <li>Memperhatikan kesejahteraan dan keselamatan kerja Pihak Kedua sesuai dengan kemampuan dan kondisi Pihak Pertama.</li>
+        <li>Mengembangkan potensi yang dimiliki karyawan sesuai dengan kemampuan dan kondisi Pihak Pertama.</li>
+        <li>Melaksanakan peraturan di bidang ketenaga-kerjaan seoptimal mungkin dengan mengacu kepada situasi dan kondisi Pihak Pertama tanpa mengabaikan hak-hak normatif Pihak Kedua sesuai dengan Peraturan Perundang-undangan.</li>
+      </ol>
 
-      <h2>PASAL 5 — LAIN-LAIN</h2>
-      <p>Bilamana terdapat hal-hal yang belum diatur atau tercantum dalam
-      perjanjian ini, akan ditetapkan secara musyawarah mufakat oleh kedua
-      belah pihak dan disesuaikan dengan peraturan perundang-undangan yang
-      berlaku.</p>
+      <h2>PASAL 5</h2>
+      <h3>LAIN - LAIN</h3>
+      <p>Bilamana terdapat hal-hal yang belum diatur/tercantum dalam Perjanjian ini, akan ditetapkan
+      secara musyawarah mufakat oleh kedua belah pihak dan disesuaikan dengan peraturan
+      perundang-undangan yang berlaku.</p>
 
-      <p>Setelah kedua belah pihak membaca dengan seksama serta memahami isi
-      ketentuan perjanjian kerja ini, perjanjian dibuat rangkap 2 (dua) dan
-      masing-masing mempunyai kekuatan hukum yang sama.</p>
+      <p>Setelah kedua belah pihak membaca dengan seksama serta memahami isi dari ketentuan dalam
+      pasal-pasal perjanjian kerja ini dengan sungguh-sungguh dan dengan tanpa ada paksaan dari
+      pihak manapun, Surat Perjanjian Kerja ini dibuat rangkap 2 (dua) dan masing-masing mempunyai
+      kekuatan hukum yang sama.</p>
+
+      <p class="center">${cgEsc(d.city || 'Jakarta')}, ${cgDate(d.signedDate)}</p>
 
       <div class="sign">
-        <div>PIHAK PERTAMA<br>${cgEsc(d.company)}<br><br>${cgEsc(d.representative)}</div>
-        <div>PIHAK KEDUA<br><br><br>${cgEsc(d.employee?.full_name || '')}</div>
+        <div>PIHAK PERTAMA,<br><br><br>${cgEsc(d.representative)}<br>${cgEsc(d.representativeTitle)}</div>
+        <div>PIHAK KEDUA,<br><br><br>${cgEsc(employeeName)}</div>
+      </div>
+
+      <div class="sign" style="grid-template-columns:1fr 1fr; margin-top:35px;">
+        <div></div>
+        <div>Saksi<br><br><br>(___________)<br>Manager/Supervisor</div>
       </div>
     </div>`;
 }
