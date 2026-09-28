@@ -12,6 +12,14 @@ let state = {
   empF: { q: '', company: '', branch: '', department: '', position: '', status: '' }
 };
 
+/* ---------- PHASE 6D — ROLE & PERMISSION ---------- */
+function currentRole() { return String(state.profile?.role || '').toLowerCase(); }
+function isAdminUser() { return ['admin','super_admin'].includes(currentRole()); }
+function isHRUser() { return ['hr','hr_admin'].includes(currentRole()); }
+function isFinanceUser() { return ['finance','finance_admin'].includes(currentRole()); }
+function canViewCompensation() { return isHRUser() || isFinanceUser(); }
+function canManageOperationalHR() { return isAdminUser() || isHRUser(); }
+
 /* ---------- Helpers ---------- */
 const $ = s => document.querySelector(s);
 const esc = v => String(v ?? '').replace(/[&<>'"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[c]));
@@ -100,7 +108,7 @@ async function loadProfile() {
 async function loadAll() {
   const queries = await Promise.all([
     sb.from('employees').select('*, companies(name), branches(name), departments(name), positions(name)').order('full_name'),
-    sb.from('contracts').select('*').order('end_date', { ascending: true }),
+    (isAdminUser() ? sb.from('contracts_admin_safe').select('*').order('end_date', { ascending: true }) : sb.from('contracts').select('*').order('end_date', { ascending: true })),
     sb.from('leave_requests').select('*, employees(full_name)').order('start_date', { ascending: false }),
     sb.from('warnings').select('*, employees(full_name)').order('issue_date', { ascending: false }),
     sb.from('companies').select('*').order('name'),
@@ -124,7 +132,7 @@ async function loadAll() {
 /* ---------- Shell ---------- */
 function renderApp() {
   const labels = { dashboard: 'Dashboard', employees: 'Karyawan', attendance: 'Absensi', contracts: 'Kontrak', leave: 'Cuti', warnings: 'Teguran / SP', master: 'Master Data' };
-  document.querySelector('#app').innerHTML = `<div class="shell"><aside class="sidebar"><div class="logo">HR Employee System</div><div class="nav">${Object.keys(labels).map(v => `<button class="${state.view === v ? 'active' : ''}" data-view="${v}">${labels[v]}</button>`).join('')}</div></aside><main class="main"><div class="topbar"><h1>${title()}</h1><div class="userbox"><span>${esc(state.profile.full_name || state.session.user.email)}</span><span class="avatar">${esc((state.profile.full_name || 'A')[0].toUpperCase())}</span><button id="logout" class="btn btn-light">Keluar</button></div></div><div id="content"></div></main></div>`;
+  document.querySelector('#app').innerHTML = `<div class="shell"><aside class="sidebar"><div class="logo">HR Employee System</div><div class="nav">${Object.keys(labels).map(v => `<button class="${state.view === v ? 'active' : ''}" data-view="${v}">${labels[v]}</button>`).join('')}</div></aside><main class="main"><div class="topbar"><h1>${title()}</h1><div class="userbox"><span>${esc(state.profile.full_name || state.session.user.email)} <span class="muted">(${esc(currentRole() || 'user')})</span></span><span class="avatar">${esc((state.profile.full_name || 'A')[0].toUpperCase())}</span><button id="logout" class="btn btn-light">Keluar</button></div></div><div id="content"></div></main></div>`;
   document.querySelectorAll('[data-view]').forEach(b => b.onclick = () => { state.view = b.dataset.view; renderApp(); });
   $('#logout').onclick = async () => { await sb.auth.signOut(); };
   renderView();
@@ -285,13 +293,14 @@ window.contractForm = (id) => {
     <div class="field"><label>Jabatan</label><select name="position_id"></select></div>
     <div class="field field-full"><label>Outlet / Lokasi Kerja</label><select name="location_ref">${location.html}</select></div>
 
+    ${canViewCompensation() ? `
     <div class="field field-full"><div class="sub-title" style="margin:8px 0 0">Remunerasi</div></div>
     ${num('base_salary', 'Gaji Pokok')}
     ${num('position_allowance', 'Tunjangan Jabatan')}
     ${num('performance_incentive', 'Insentif Kinerja')}
     ${num('discipline_allowance', 'Tunjangan Kedisiplinan')}
     ${num('meal_allowance', 'Tunjangan Makan')}
-    ${num('thr_amount', 'THR')}
+    ${num('thr_amount', 'THR')}` : `<div class="field field-full"><div class="info-box">Data remunerasi tidak ditampilkan untuk akun Admin.</div></div>`}
 
     <div class="field field-full"><div class="sub-title" style="margin:8px 0 0">Amandemen PKWT</div><div class="muted">Jika bukan amandemen, bagian ini boleh dikosongkan. Periode baru menggunakan Tanggal Mulai/Berakhir di atas.</div></div>
     <div class="field field-full"><label>Kontrak Sebelumnya</label><select name="previous_contract_id"><option value="">Tidak ada</option>${state.contracts.filter(c => c.id !== rec?.id && c.employee_id === currentEmployee).map(c => `<option value="${esc(c.id)}" ${rec?.previous_contract_id === c.id ? 'selected' : ''}>${esc(c.contract_number || contractTypeLabel(c.contract_type))} — ${fmtDate(c.start_date)} s/d ${fmtDate(c.end_date)}</option>`).join('')}</select></div>
@@ -344,12 +353,14 @@ window.contractForm = (id) => {
       position_id: clean(fd.get('position_id')),
       branch_id,
       work_location_id,
-      base_salary: money('base_salary'),
-      position_allowance: money('position_allowance'),
-      performance_incentive: money('performance_incentive'),
-      discipline_allowance: money('discipline_allowance'),
-      meal_allowance: money('meal_allowance'),
-      thr_amount: money('thr_amount'),
+      ...(canViewCompensation() ? {
+        base_salary: money('base_salary'),
+        position_allowance: money('position_allowance'),
+        performance_incentive: money('performance_incentive'),
+        discipline_allowance: money('discipline_allowance'),
+        meal_allowance: money('meal_allowance'),
+        thr_amount: money('thr_amount')
+      } : {}),
       previous_contract_id: clean(fd.get('previous_contract_id')),
       previous_start_date: clean(fd.get('previous_start_date')),
       previous_end_date: clean(fd.get('previous_end_date')),
@@ -685,7 +696,7 @@ function contracts() {
       <div class="card"><div class="muted">Sudah Berakhir</div><div class="metric">${rows.filter(c => c.end_date && c.end_date < today).length}</div></div>
     </div>
     ${rows.length ? `<div class="table-wrap"><table class="table"><thead><tr>
-      <th>Karyawan</th><th>No. Dokumen</th><th>Jenis</th><th>Mulai</th><th>Berakhir</th><th>Remunerasi</th><th>Status</th><th>Aksi</th>
+      <th>Karyawan</th><th>No. Dokumen</th><th>Jenis</th><th>Mulai</th><th>Berakhir</th>${canViewCompensation() ? '<th>Remunerasi</th>' : ''}<th>Status</th><th>Aksi</th>
     </tr></thead><tbody>${rows.map(c => {
       const e = state.employees.find(x => x.id === c.employee_id);
       const n = daysUntil(c.end_date);
@@ -696,7 +707,7 @@ function contracts() {
         <td>${esc(contractTypeLabel(c.contract_type))}</td>
         <td>${fmtDate(c.start_date)}</td>
         <td>${fmtDate(c.end_date)} ${n !== null ? `<span class="badge ${n < 0 ? 'badge-red' : n <= 30 ? 'badge-yellow' : 'badge-green'}">${n < 0 ? 'Lewat' : n + ' hari'}</span>` : ''}</td>
-        <td><div>${moneyFmt(c.base_salary)}</div><div class="muted">${esc(loc)}</div></td>
+        ${canViewCompensation() ? `<td><div>${moneyFmt(c.base_salary)}</div><div class="muted">${esc(loc)}</div></td>` : ''}
         <td>${contractStatusBadge(c.status)}</td>
         <td><div class="row-actions"><button class="btn btn-light btn-sm" onclick="contractForm('${esc(c.id)}')">Edit</button>${c.document_path ? `<button class="btn btn-light btn-sm" onclick="contractOpenDocument('${esc(c.document_path)}')">Dokumen</button>` : ''}</div></td>
       </tr>`;
@@ -2488,7 +2499,7 @@ const PHASE6_LEAVE = {
 
 function p6IsHR() {
   const r = String(state.profile?.role || '').toLowerCase();
-  return !Object.prototype.hasOwnProperty.call(state.profile || {}, 'role') || ['admin','super_admin','hr','hr_admin'].includes(r);
+  return ['admin','super_admin','hr','hr_admin'].includes(r);
 }
 
 function p6Employee(id) { return state.employees.find(e => e.id === id) || null; }
@@ -2965,164 +2976,3 @@ window.employeeEditForm = function(id) {
 };
 
 console.log('HR Employee System Phase 6B loaded: Supervisor field in Employee Edit');
-/* =========================================================
-   PHASE 6C - APPROVAL FLOW FIX
-   Alur wajib: Employee -> SPV -> HR
-   Tempel PALING BAWAH app.js Phase 6B.
-   ========================================================= */
-
-function p6cCanSupervisorApprove(r, myId) {
-  const e = p6Employee(r.employee_id);
-  return !!myId && e?.supervisor_employee_id === myId && r.status === 'pending';
-}
-
-function p6cCanHRApprove(r, isHR) {
-  return !!isHR && r.status === 'supervisor_approved' && r.supervisor_status === 'approved' && r.hr_status !== 'approved';
-}
-
-window.p6Approve = async function(id, level, decision) {
-  const r = state.leave.find(x => x.id === id);
-  if (!r) return;
-
-  const myId = state.profile?.employee_id || null;
-  const isHR = p6IsHR();
-
-  if (level === 'supervisor') {
-    if (!p6cCanSupervisorApprove(r, myId)) {
-      toast('Pengajuan ini bukan antrean SPV Anda atau sudah diproses.', 'error');
-      return;
-    }
-
-    if (decision === 'approved') {
-      const q = await sb.from('leave_requests').update({
-        supervisor_status: 'approved',
-        status: 'supervisor_approved',
-        supervisor_approved_at: new Date().toISOString(),
-        supervisor_approved_by: state.profile.id
-      }).eq('id', id).eq('status', 'pending');
-      if (q.error) { toast(friendlyError(q.error), 'error'); return; }
-
-      const h = await sb.from('leave_approvals').insert({
-        leave_request_id: id,
-        approver_profile_id: state.profile.id,
-        approval_level: 'supervisor',
-        decision: 'approved'
-      });
-      if (h.error) { toast(friendlyError(h.error), 'error'); return; }
-    } else {
-      const note = prompt('Catatan penolakan SPV (opsional):') || null;
-      const q = await sb.from('leave_requests').update({
-        supervisor_status: 'rejected',
-        status: 'rejected',
-        supervisor_note: note
-      }).eq('id', id).eq('status', 'pending');
-      if (q.error) { toast(friendlyError(q.error), 'error'); return; }
-
-      const h = await sb.from('leave_approvals').insert({
-        leave_request_id: id,
-        approver_profile_id: state.profile.id,
-        approval_level: 'supervisor',
-        decision: 'rejected',
-        note
-      });
-      if (h.error) { toast(friendlyError(h.error), 'error'); return; }
-    }
-  } else if (level === 'hr') {
-    if (!p6cCanHRApprove(r, isHR)) {
-      toast('HR hanya dapat memproses pengajuan yang sudah disetujui SPV.', 'error');
-      return;
-    }
-
-    if (decision === 'approved') {
-      const q = await sb.from('leave_requests').update({
-        hr_status: 'approved',
-        status: 'approved',
-        hr_approved_at: new Date().toISOString(),
-        hr_approved_by: state.profile.id
-      }).eq('id', id).eq('status', 'supervisor_approved');
-      if (q.error) { toast(friendlyError(q.error), 'error'); return; }
-
-      const h = await sb.from('leave_approvals').insert({
-        leave_request_id: id,
-        approver_profile_id: state.profile.id,
-        approval_level: 'hr',
-        decision: 'approved'
-      });
-      if (h.error) { toast(friendlyError(h.error), 'error'); return; }
-    } else {
-      const note = prompt('Catatan penolakan HR (opsional):') || null;
-      const q = await sb.from('leave_requests').update({
-        hr_status: 'rejected',
-        status: 'rejected',
-        hr_note: note
-      }).eq('id', id).eq('status', 'supervisor_approved');
-      if (q.error) { toast(friendlyError(q.error), 'error'); return; }
-
-      const h = await sb.from('leave_approvals').insert({
-        leave_request_id: id,
-        approver_profile_id: state.profile.id,
-        approval_level: 'hr',
-        decision: 'rejected',
-        note
-      });
-      if (h.error) { toast(friendlyError(h.error), 'error'); return; }
-    }
-  }
-
-  toast(decision === 'approved' ? 'Pengajuan disetujui.' : 'Pengajuan ditolak.');
-  await p6RefreshLeaveData();
-  leave();
-};
-
-/* Override halaman Cuti agar antrean mengikuti level approval. */
-window.leave = function() {
-  const rows = state.leave || [];
-  const types = state.leaveTypes || [];
-  const isHR = p6IsHR();
-  const myId = state.profile?.employee_id || null;
-
-  const myPending = rows.filter(r => r.employee_id === myId && ['pending','supervisor_approved'].includes(r.status)).length;
-  const supQueue = rows.filter(r => p6cCanSupervisorApprove(r, myId)).length;
-  const hrQueue = rows.filter(r => p6cCanHRApprove(r, isHR)).length;
-  const activeEmps = state.employees.filter(e => e.employment_status === 'active');
-  const balanceRows = activeEmps.map(e => {
-    const t = types.find(x => x.code === 'ANNUAL');
-    return t ? {e, b:p6BalanceFor(e.id,t.id,new Date().getFullYear())} : null;
-  }).filter(Boolean);
-  const canApply = isHR || !!myId;
-
-  $('#content').innerHTML = `<div class="section">
-    <div class="section-head">
-      <div><h2>Cuti & Izin</h2><div class="muted">Pengajuan → Approval SPV → Approval HR</div></div>
-      <div class="row-actions">${canApply ? `<button class="btn btn-primary" onclick="p6NewLeave('${esc(myId || '')}')">+ Ajukan Cuti / Izin</button>` : ''}</div>
-    </div>
-    <div class="cards">
-      <div class="card"><div class="muted">Pengajuan</div><div class="metric">${rows.length}</div></div>
-      <div class="card"><div class="muted">Menunggu SPV</div><div class="metric">${supQueue}</div></div>
-      <div class="card"><div class="muted">Menunggu HR</div><div class="metric">${hrQueue}</div></div>
-      <div class="card"><div class="muted">Pengajuan Saya</div><div class="metric">${myPending}</div></div>
-    </div>
-  </div>
-  <div class="section"><div class="section-head"><h2>Saldo Cuti Tahunan</h2><span class="muted">Tahun ${new Date().getFullYear()}</span></div>
-    ${balanceRows.length ? `<div class="table-wrap"><table class="table"><thead><tr><th>Karyawan</th><th>Hak</th><th>Terpakai</th><th>Menunggu</th><th>Sisa</th><th>Sisa setelah pengajuan</th></tr></thead><tbody>${balanceRows.map(x => `<tr><td><b>${esc(x.e.full_name)}</b><div class="muted">${esc(x.e.employee_number || '-')}</div></td><td>${x.b.entitlement}</td><td>${x.b.approved}</td><td>${x.b.pending}</td><td><b>${x.b.available}</b></td><td>${x.b.afterPending}</td></tr>`).join('')}</tbody></table></div>` : '<div class="card empty">Belum ada karyawan aktif.</div>'}
-  </div>
-  ${p6SupervisorSection()}
-  <div class="section"><div class="section-head"><h2>Pengajuan Cuti / Izin</h2></div>
-    ${rows.length ? `<div class="table-wrap"><table class="table"><thead><tr><th>Karyawan</th><th>Jenis</th><th>Periode</th><th>Hari</th><th>Status</th><th>Aksi</th></tr></thead><tbody>${rows.map(r => {
-      const e = p6Employee(r.employee_id), t = p6LeaveType(r.leave_type_id);
-      const mine = r.employee_id === myId;
-      const canSup = p6cCanSupervisorApprove(r,myId);
-      const canHr = p6cCanHRApprove(r,isHR);
-      return `<tr><td><b>${esc(e?.full_name || r.employees?.full_name || '-')}</b><div class="muted">${esc(e?.employee_number || '')}</div></td>
-        <td>${esc(t?.name || '-')}</td><td>${fmtDate(r.start_date)} — ${fmtDate(r.end_date)}</td>
-        <td>${esc(r.total_days || p6Days(r.start_date,r.end_date))}</td><td>${p6StatusBadge(r.status)}</td>
-        <td><div class="row-actions"><button class="btn btn-light btn-sm" onclick="p6OpenDetail('${esc(r.id)}')">Detail</button>
-        ${canSup ? `<button class="btn btn-primary btn-sm" onclick="p6Approve('${esc(r.id)}','supervisor','approved')">Setujui SPV</button><button class="btn btn-light btn-sm" onclick="p6Approve('${esc(r.id)}','supervisor','rejected')">Tolak</button>` : ''}
-        ${canHr ? `<button class="btn btn-primary btn-sm" onclick="p6Approve('${esc(r.id)}','hr','approved')">Approve HR</button><button class="btn btn-light btn-sm" onclick="p6Approve('${esc(r.id)}','hr','rejected')">Tolak HR</button>` : ''}
-        ${mine && ['pending','supervisor_approved'].includes(r.status) ? `<button class="btn btn-light btn-sm" onclick="p6CancelLeave('${esc(r.id)}')">Batalkan</button>` : ''}
-        </div></td></tr>`;
-    }).join('')}</tbody></table></div>` : '<div class="card empty">Belum ada pengajuan cuti/izin.</div>'}
-  </div>`;
-};
-
-console.log('HR Employee System Phase 6C loaded: Approval flow Employee -> SPV -> HR');
