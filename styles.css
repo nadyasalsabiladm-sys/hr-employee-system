@@ -19,3 +19,61 @@
 .toast-success{background:#f0fdf4;color:#166534;border-color:#bbf7d0}
 .toast-error{background:#fef2f2;color:#991b1b;border-color:#fecaca}
 @media(max-width:600px){input,select,textarea{font-size:16px}.toolbar>*{flex:1 1 100%}.section-head{flex-wrap:wrap}}
+
+/* ===== PHASE 2A: Detail karyawan & riwayat penempatan ===== */
+.modal-wide{width:min(900px,100%)}
+.sub-title{font-size:15px;margin:0 0 12px}
+.detail-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;background:#f9fafb;border:1px solid var(--line);border-radius:12px;padding:16px}
+.detail-item{min-width:0;overflow-wrap:anywhere}
+.detail-item .muted{margin-bottom:3px}
+.modal .table{min-width:620px}
+.field textarea{resize:vertical}
+.field input:disabled{background:#f3f4f6;color:#6b7280}
+@media(max-width:900px){.detail-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:600px){.detail-grid{grid-template-columns:1fr}}
+
+/* ===== PHASE 3: Absensi selfie + GPS ===== */
+.btn-lg{padding:15px 18px;font-size:16px;border-radius:12px;min-height:52px}
+.field-full{grid-column:1/-1}
+.info-box{background:#eff6ff;border:1px solid #bfdbfe;color:#1e3a8a;padding:12px 14px;border-radius:12px;font-size:13px;line-height:1.5}
+.ok-box{background:#f0fdf4;border-color:#bbf7d0;color:#166534}
+.att-panel .error{margin:14px 0 0}
+.att-cta{margin-top:16px;min-height:60px;font-size:18px}
+.att-filters .mini{display:grid;gap:4px;font-size:11px;font-weight:700;color:var(--muted)}
+.att-filters .mini input{font-weight:400;color:var(--text)}
+.att-camera{position:relative;width:100%;aspect-ratio:3/4;max-height:62vh;margin:0 auto;background:#0f172a;border-radius:14px;overflow:hidden;display:grid;place-items:center}
+.att-camera video,.att-camera img{width:100%;height:100%;object-fit:cover;display:block}
+.att-camera video{transform:scaleX(-1)}
+.att-camera [hidden]{display:none!important}
+.att-cam-msg{position:absolute;inset:0;display:grid;place-items:center;text-align:center;padding:24px;color:#fff;font-size:14px;line-height:1.5}
+.att-shots{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin:12px 0}
+.att-shots [hidden]{display:none!important}
+.att-rows{margin-bottom:12px}
+.att-row{display:flex;justify-content:space-between;gap:14px;padding:9px 0;border-bottom:1px solid var(--line);font-size:14px}
+.att-row span{color:var(--muted);flex:none}
+.att-row b{text-align:right;overflow-wrap:anywhere}
+.att-row .ok{color:#166534}.att-row .bad{color:#b91c1c}
+.att-submit{margin-top:10px}
+.att-detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.att-photo{width:100%;aspect-ratio:3/4;max-height:340px;background:#f3f4f6;border-radius:12px;overflow:hidden;display:grid;place-items:center;color:var(--muted);font-size:13px;margin-bottom:12px;text-align:center;padding:8px}
+.att-photo img{width:100%;height:100%;object-fit:cover;display:block}
+.detail-list{display:grid;gap:10px}
+
+@media(max-width:900px){
+  /* Menu mobile: bar atas yang bisa digeser, tetap berlabel (sebelumnya hanya titik) */
+  .shell{display:block}
+  .sidebar{position:sticky;top:0;inset:auto;width:100%;height:auto;padding:8px 10px;z-index:10;display:flex;align-items:center;gap:8px;overflow-x:auto}
+  .logo{font-size:0;padding:0 8px 0 4px;flex:none}
+  .logo:after{content:'HR';font-size:16px}
+  .nav{display:flex;gap:4px}
+  .nav button{font-size:13px;white-space:nowrap;padding:9px 12px;text-align:left}
+  .nav button:before{content:none}
+  .main{margin-left:0;width:100%}
+  .att-detail-grid{grid-template-columns:1fr}
+}
+@media(max-width:600px){
+  .att-backdrop{padding:0;align-items:stretch}
+  .att-modal{width:100%;height:100%;max-height:100%;border-radius:0;padding:14px 14px calc(14px + env(safe-area-inset-bottom,0px))}
+  .att-camera{max-height:58vh}
+  .att-submit{position:sticky;bottom:0}
+}
