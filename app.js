@@ -2602,3 +2602,276 @@ function contracts() {
       `}
     </div>`;
 }
+/* =========================================================
+   PHASE 5 FINAL FIX — AMENDMENT PKWT AUTO-LINK
+   Overrides the Contract Generator amendment behavior.
+   ========================================================= */
+
+function cgLatestPreviousPkwt(employeeId) {
+  return (state.contracts || [])
+    .filter(c => c.employee_id === employeeId && c.contract_type === 'pkwt')
+    .sort((a, b) => {
+      const ad = a.start_date || '';
+      const bd = b.start_date || '';
+      return bd.localeCompare(ad);
+    })[0] || null;
+}
+
+function cgAmendmentNumber(previousContract) {
+  return previousContract?.contract_number || '';
+}
+
+function cgAmendmentHtml(d) {
+  const oldStart = d.previousStartDate ? cgDate(d.previousStartDate) : '-';
+  const oldEnd = d.previousEndDate ? cgDate(d.previousEndDate) : '-';
+  const newStart = d.startDate ? cgDate(d.startDate) : '-';
+  const newEnd = d.endDate ? cgDate(d.endDate) : '-';
+  const previousNo = d.previousContractNumber || d.number || '-';
+
+  return `
+    <div class="cg-doc">
+      <h1>AMANDemen I</h1>
+      <h1 style="font-size:14pt;margin-top:-8px;">PERJANJIAN KERJA WAKTU TERTENTU</h1>
+      <p class="center">Nomor: ${cgEsc(d.number || previousNo)}</p>
+
+      <p>Yang bertanda tangan di bawah ini:</p>
+
+      <p><b>1. Pihak Perusahaan</b><br>
+      Nama Perusahaan : CV. Zayco Boga Alifa<br>
+      Alamat Perusahaan : ${cgEsc(d.companyAddress || '-') }<br>
+      Dalam hal ini diwakili oleh<br>
+      Nama : ${cgEsc(d.representative || '-') }<br>
+      Jabatan : ${cgEsc(d.representativeTitle || '-') }<br>
+      Dalam hal ini bertindak untuk dan atas nama CV Zayco Boga Alifa,
+      Selanjutnya disebut sebagai “Pihak Pertama”.</p>
+
+      <p><b>2. Nama Pekerja : ${cgEsc(d.employee?.full_name || '-') }</b><br>
+      NIK : ${cgEsc(d.employee?.employee_number || '-') }<br>
+      Tempat, &amp; Tanggal lahir : ${cgEsc(d.birthInfo || '-') }<br>
+      Jenis Kelamin : ${cgEsc(d.gender || '-') }<br>
+      Alamat : ${cgEsc(d.employee?.address || '-') }<br>
+      Dalam Hal ini disebut “Pihak Kedua”.</p>
+
+      <p>Bersepakat untuk mengadakan Amandemen I terhadap Kesepakatan Kerja
+      Waktu Tertentu No. ${cgEsc(previousNo)} dengan rincian sebagai berikut:</p>
+
+      <h2>Pasal I</h2>
+      <h2 style="font-size:11pt;">Jangka Waktu Kesepakatan Kerja</h2>
+
+      <p><b>Semula berbunyi:</b></p>
+      <p>Perjanjian Kerja Waktu Tertentu ini berlaku terhitung mulai tanggal
+      <b>${oldStart}</b> sampai dengan tanggal <b>${oldEnd}</b>.</p>
+
+      <p><b>Diubah Menjadi:</b></p>
+      <p>Perjanjian Kerja Waktu Tertentu ini berlaku terhitung mulai tanggal
+      <b>${newStart}</b> sampai dengan tanggal <b>${newEnd}</b>.</p>
+
+      <p>Demikian Amandemen I ini dibuat dan ditandatangani berdasarkan
+      kesepakatan kedua belah pihak.</p>
+
+      <div class="sign">
+        <div>Pihak Pertama<br><br><br>${cgEsc(d.representative || '-') }<br>${cgEsc(d.representativeTitle || '-') }</div>
+        <div>Pihak Kedua<br><br><br>${cgEsc(d.employee?.full_name || '-') }<br>Karyawan</div>
+      </div>
+    </div>`;
+}
+
+function cgCollectFormData(form) {
+  const fd = new FormData(form);
+  const emp = state.employees.find(e => e.id === fd.get('cg_employee_id'));
+
+  return {
+    employee: emp,
+    company: cgCompanyName(emp),
+    type: fd.get('cg_type'),
+    number: String(fd.get('cg_number') || '').trim(),
+    joinDate: fd.get('cg_join_date') || emp?.join_date || '',
+    startDate: fd.get('cg_start_date') || '',
+    endDate: fd.get('cg_end_date') || '',
+    signedDate: fd.get('cg_signed_date') || '',
+    department: String(fd.get('cg_department') || cgDepartment(emp)).trim(),
+    position: String(fd.get('cg_position') || cgPosition(emp)).trim(),
+    supervisor: String(fd.get('cg_supervisor') || '').trim(),
+    workDays: String(fd.get('cg_work_days') || '').trim(),
+    location: String(fd.get('cg_location') || cgCurrentLocation(emp)).trim(),
+    baseSalary: Number(fd.get('cg_base_salary')) || 0,
+    positionAllowance: Number(fd.get('cg_position_allowance')) || 0,
+    performance: Number(fd.get('cg_performance')) || 0,
+    discipline: Number(fd.get('cg_discipline')) || 0,
+    meal: Number(fd.get('cg_meal')) || 0,
+    thr: Number(fd.get('cg_thr')) || 0,
+    representative: String(fd.get('cg_rep') || '').trim(),
+    representativeTitle: String(fd.get('cg_rep_title') || '').trim(),
+    companyAddress: String(fd.get('cg_company_address') || '').trim(),
+    notes: String(fd.get('cg_notes') || '').trim(),
+    statusText: String(fd.get('cg_status_text') || '').trim(),
+    birthInfo: String(fd.get('cg_birth_info') || '').trim(),
+    gender: String(fd.get('cg_gender') || '').trim(),
+    previousContractNumber: String(fd.get('cg_previous_contract_number') || '').trim(),
+    previousStartDate: fd.get('cg_previous_start_date') || '',
+    previousEndDate: fd.get('cg_previous_end_date') || '',
+    previousContractId: String(fd.get('cg_previous_contract_id') || '').trim()
+  };
+}
+
+function cgOpenGenerator() {
+  const body = `
+    <div class="info-box">
+      Pilih karyawan dan jenis dokumen. Untuk <b>Amandemen PKWT</b>, sistem otomatis
+      mengambil kontrak PKWT terakhir karyawan sebagai kontrak sebelumnya.
+    </div>
+
+    <div class="modal-grid">
+      <div class="field field-full">
+        <label>Karyawan *</label>
+        <select name="cg_employee_id" required>
+          <option value="">Pilih karyawan</option>
+          ${cgEmployeeOptions('')}
+        </select>
+      </div>
+
+      <div class="field">
+        <label>Jenis Dokumen *</label>
+        <select name="cg_type" required>
+          <option value="offering_letter">Offering Letter</option>
+          <option value="pkwt">PKWT</option>
+          <option value="pkwtt">PKWTT</option>
+          <option value="amendment">Amandemen PKWT</option>
+        </select>
+      </div>
+
+      ${cgField('cg_number', 'No. Dokumen / Kontrak')}
+      <input type="hidden" name="cg_previous_contract_id" value="">
+      ${cgField('cg_previous_contract_number', 'No. Kontrak Sebelumnya')}
+      ${cgDateField('cg_previous_start_date', 'Periode Sebelumnya — Mulai')}
+      ${cgDateField('cg_previous_end_date', 'Periode Sebelumnya — Berakhir')}
+      ${cgDateField('cg_join_date', 'Tanggal Bergabung')}
+      ${cgDateField('cg_start_date', 'Tanggal Mulai', '', true)}
+      ${cgDateField('cg_end_date', 'Tanggal Berakhir')}
+      ${cgDateField('cg_signed_date', 'Tanggal Tanda Tangan')}
+
+      ${cgField('cg_status_text', 'Status Karyawan', 'Probation - 3 Bulan')}
+      ${cgField('cg_birth_info', 'Tempat & Tanggal Lahir')}
+      ${cgField('cg_gender', 'Jenis Kelamin')}
+      ${cgField('cg_department', 'Departemen')}
+      ${cgField('cg_position', 'Jabatan')}
+      ${cgField('cg_supervisor', 'Melapor Kepada', 'PIC (Person In Charge) - SPV/Asst.')}
+      ${cgField('cg_work_days', 'Hari & Jam Kerja', '6 (Enam) Hari kerja, 1 (Satu) Hari Libur')}
+
+      <div class="field field-full">
+        <label>Lokasi Kerja</label>
+        <input name="cg_location">
+      </div>
+
+      <div class="field field-full"><div class="sub-title">Remunerasi</div></div>
+      ${cgNumField('cg_base_salary', 'Gaji Pokok')}
+      ${cgNumField('cg_position_allowance', 'Tunjangan Jabatan')}
+      ${cgNumField('cg_performance', 'Insentif Kinerja')}
+      ${cgNumField('cg_discipline', 'Tunjangan Kedisiplinan')}
+      ${cgNumField('cg_meal', 'Tunjangan Makan')}
+      ${cgNumField('cg_thr', 'THR')}
+
+      <div class="field field-full"><div class="sub-title">Pihak Pertama</div></div>
+      ${cgField('cg_rep', 'Nama Perwakilan')}
+      ${cgField('cg_rep_title', 'Jabatan Perwakilan')}
+      <div class="field field-full">
+        <label>Alamat Perusahaan</label>
+        <textarea name="cg_company_address" rows="2"></textarea>
+      </div>
+    </div>`;
+
+  const modal = openModal(
+    'Buat & Export Kontrak',
+    body,
+    async form => {
+      const d = cgCollectFormData(form);
+
+      if (!d.employee || !d.type) {
+        toast('Lengkapi Karyawan dan Jenis Dokumen.', 'error');
+        return false;
+      }
+
+      if (d.type !== 'amendment' && !d.startDate) {
+        toast('Tanggal Mulai wajib diisi.', 'error');
+        return false;
+      }
+
+      if (d.type === 'amendment') {
+        if (!d.previousContractId || !d.previousContractNumber || !d.previousStartDate || !d.previousEndDate) {
+          toast('Kontrak PKWT sebelumnya belum ditemukan. Pilih karyawan yang memiliki kontrak PKWT.', 'error');
+          return false;
+        }
+        if (!d.startDate || !d.endDate) {
+          toast('Untuk Amandemen PKWT, isi Tanggal Mulai Baru dan Tanggal Berakhir Baru.', 'error');
+          return false;
+        }
+        if (!d.number) d.number = d.previousContractNumber;
+      }
+
+      const preview = `
+        <div class="section">
+          <div class="section-head">
+            <h2>Preview Dokumen</h2>
+            <div class="row-actions">
+              <button type="button" class="btn btn-light" onclick="cgExportWord()">📄 Export Word</button>
+              <button type="button" class="btn btn-primary" onclick="cgExportPdf()">📕 Export PDF</button>
+            </div>
+          </div>
+          <div id="cgPreview">${cgBuildHtml(d)}</div>
+        </div>`;
+
+      modal.querySelector('.modal').innerHTML = `
+        <div class="section-head">
+          <h2>Preview ${cgEsc(cgTypeLabel(d.type))}</h2>
+          <button type="button" class="btn btn-light" data-close>Tutup</button>
+        </div>
+        ${preview}`;
+
+      modal.querySelectorAll('[data-close]').forEach(b => b.onclick = () => modal.remove());
+      window._cgExportData = d;
+      return false;
+    },
+    'Preview'
+  );
+
+  const employeeSelect = modal.querySelector('[name="cg_employee_id"]');
+  const typeSelect = modal.querySelector('[name="cg_type"]');
+
+  const refresh = () => {
+    const e = state.employees.find(x => x.id === employeeSelect.value);
+    if (!e) return;
+
+    const company = cgCompanyName(e);
+    const defaults = cgCompanyDefaults(company);
+
+    modal.querySelector('[name="cg_department"]').value = cgDepartment(e);
+    modal.querySelector('[name="cg_position"]').value = cgPosition(e);
+    modal.querySelector('[name="cg_location"]').value = cgCurrentLocation(e);
+    modal.querySelector('[name="cg_rep"]').value = defaults.representative;
+    modal.querySelector('[name="cg_rep_title"]').value = defaults.representative_title;
+    modal.querySelector('[name="cg_company_address"]').value = defaults.address;
+    modal.querySelector('[name="cg_join_date"]').value = e.join_date || '';
+
+    if (typeSelect.value === 'amendment') {
+      const previous = cgLatestPreviousPkwt(e.id);
+      modal.querySelector('[name="cg_previous_contract_id"]').value = previous?.id || '';
+      modal.querySelector('[name="cg_previous_contract_number"]').value = previous?.contract_number || '';
+      modal.querySelector('[name="cg_previous_start_date"]').value = previous?.start_date || '';
+      modal.querySelector('[name="cg_previous_end_date"]').value = previous?.end_date || '';
+      modal.querySelector('[name="cg_number"]').value = previous?.contract_number || '';
+      modal.querySelector('[name="cg_start_date"]').value = '';
+      modal.querySelector('[name="cg_end_date"]').value = '';
+      modal.querySelector('[name="cg_signed_date"]').value = '';
+    } else {
+      modal.querySelector('[name="cg_previous_contract_id"]').value = '';
+      modal.querySelector('[name="cg_previous_contract_number"]').value = '';
+      modal.querySelector('[name="cg_previous_start_date"]').value = '';
+      modal.querySelector('[name="cg_previous_end_date"]').value = '';
+    }
+  };
+
+  employeeSelect.onchange = refresh;
+  typeSelect.onchange = refresh;
+  refresh();
+  return modal;
+}
