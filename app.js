@@ -1521,3 +1521,958 @@ window.attDetail = id => {
 };
 
 init();
+
+/* =========================================================
+   PHASE 5 — CONTRACT GENERATOR
+   Buat Kontrak dari Website + Export Word/PDF
+   Tambahkan blok ini di PALING BAWAH app.js.
+   ========================================================= */
+
+async function cgLoadDocxConverter() {
+  if (window.docshift) return window.docshift;
+
+  return new Promise((resolve, reject) => {
+    const old = document.querySelector('script[data-docshift="1"]');
+
+    if (old) {
+      old.addEventListener('load', () => resolve(window.docshift));
+      old.addEventListener('error', () => reject(new Error('Library Word gagal dimuat.')));
+      return;
+    }
+
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/docshift@0.0.73/dist/docshift.min.js';
+    s.dataset.docshift = '1';
+
+    s.onload = () => window.docshift
+      ? resolve(window.docshift)
+      : reject(new Error('Library Word tidak tersedia.'));
+
+    s.onerror = () => reject(new Error('Library Word gagal dimuat.'));
+    document.head.appendChild(s);
+  });
+}
+
+const cgTypeLabel = t => ({
+  offering_letter: 'Offering Letter',
+  pkwt: 'Perjanjian Kerja Waktu Tertentu (PKWT)',
+  pkwtt: 'Perjanjian Kerja Waktu Tidak Tertentu (PKWTT)',
+  amendment: 'Amandemen PKWT',
+  probation: 'Offering Letter / Probation'
+}[t] || 'Dokumen Kontrak');
+
+const cgMoney = n => {
+  if (n === null || n === undefined || n === '' || Number(n) === 0) return '-';
+  return 'Rp ' + Number(n).toLocaleString('id-ID');
+};
+
+const cgDate = d => d ? new Date(d + 'T00:00:00').toLocaleDateString('id-ID', {
+  day: 'numeric', month: 'long', year: 'numeric'
+}) : '-';
+
+const cgEsc = v => String(v ?? '').replace(/[&<>'"]/g, c => ({
+  '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;'
+}[c]));
+
+function cgCurrentLocation(emp) {
+  const a = emp ? state.currentByEmp?.[emp.id] : null;
+  if (!a) return '-';
+
+  if (a.work_location_id) {
+    return a.work_locations?.name ||
+      state.workLocations?.find(x => x.id === a.work_location_id)?.name || '-';
+  }
+
+  if (a.branch_id) {
+    return a.branches?.name ||
+      state.branches?.find(x => x.id === a.branch_id)?.name || '-';
+  }
+
+  return '-';
+}
+
+function cgCompanyDefaults(companyName) {
+  const zba = /zayco/i.test(companyName || '');
+
+  return zba ? {
+    representative: 'Zayadi',
+    representative_title: 'Human Resource Departement',
+    address: 'Jl. Arco Raya No. 24, RT.004/001 Cipete Selatan, Cilandak, Jakarta Selatan',
+    hr_signer: 'Zayadi',
+    hr_title: 'Human Resource Departement'
+  } : {
+    representative: 'Adhitya Erwin Pratama',
+    representative_title: 'Human Resources Departement',
+    address: '',
+    hr_signer: 'Adhitya Erwin Pratama',
+    hr_title: 'Human Resources Departement'
+  };
+}
+
+function cgCompanyName(emp) {
+  return emp?.companies?.name ||
+    state.companies?.find(c => c.id === emp?.company_id)?.name ||
+    '-';
+}
+
+function cgDepartment(emp) {
+  return emp?.departments?.name ||
+    state.departments?.find(d => d.id === emp?.department_id)?.name ||
+    '-';
+}
+
+function cgPosition(emp) {
+  return emp?.positions?.name ||
+    state.positions?.find(p => p.id === emp?.position_id)?.name ||
+    '-';
+}
+
+function cgEmployeeOptions(selected = '') {
+  return state.employees
+    .filter(e => e.employment_status !== 'inactive')
+    .sort((a,b) => String(a.full_name || '').localeCompare(String(b.full_name || '')))
+    .map(e => `<option value="${cgEsc(e.id)}" ${e.id === selected ? 'selected' : ''}>
+      ${cgEsc(e.full_name || '-')} — ${cgEsc(e.employee_number || '-')}
+    </option>`)
+    .join('');
+}
+
+function cgField(name, label, value = '', type = 'text', required = false) {
+  return `<div class="field">
+    <label>${label}${required ? ' *' : ''}</label>
+    <input name="${name}" type="${type}" ${required ? 'required' : ''} value="${cgEsc(value)}">
+  </div>`;
+}
+
+function cgDateField(name, label, value = '', required = false) {
+  return cgField(name, label, value, 'date', required);
+}
+
+function cgNumField(name, label, value = '') {
+  return cgField(name, label, value, 'number');
+}
+
+function cgGeneratorForm() {
+  const first = state.employees.find(e => e.employment_status !== 'inactive');
+  const empId = first?.id || '';
+  const emp = first;
+
+  const body = `
+    <div class="info-box">
+      <b>Buat Kontrak dari Website</b><br>
+      Pilih karyawan dan jenis dokumen. Data karyawan akan terisi otomatis.
+      Setelah selesai, HR dapat melihat preview lalu Export Word atau PDF.
+    </div>
+
+    <div class="modal-grid">
+
+      <div class="field field-full">
+        <label>Karyawan *</label>
+        <select name="cg_employee_id" required>
+          <option value="">Pilih karyawan</option>
+          ${cgEmployeeOptions(empId)}
+        </select>
+      </div>
+
+      <div class="field">
+        <label>Jenis Dokumen *</label>
+        <select name="cg_type" required>
+          <option value="offering_letter">Offering Letter</option>
+          <option value="pkwt">PKWT</option>
+          <option value="pkwtt">PKWTT</option>
+          <option value="amendment">Amandemen PKWT</option>
+        </select>
+      </div>
+
+      ${cgField('cg_number', 'No. Dokumen / Kontrak', '')}
+
+      ${cgDateField('cg_join_date', 'Tanggal Bergabung', emp?.join_date || '')}
+      ${cgDateField('cg_start_date', 'Tanggal Mulai', '', true)}
+      ${cgDateField('cg_end_date', 'Tanggal Berakhir')}
+      ${cgDateField('cg_signed_date', 'Tanggal Tanda Tangan')}
+
+      <div class="field">
+        <label>Departemen</label>
+        <input name="cg_department" value="${cgEsc(cgDepartment(emp))}">
+      </div>
+
+      <div class="field">
+        <label>Jabatan</label>
+        <input name="cg_position" value="${cgEsc(cgPosition(emp))}">
+      </div>
+
+      ${cgField('cg_supervisor', 'Melapor Kepada', 'PIC (Person In Charge) - SPV/Asst.')}
+      ${cgField('cg_work_days', 'Hari & Jam Kerja', '6 (Enam) Hari kerja, 1 (Satu) Hari Libur')}
+
+      <div class="field field-full">
+        <label>Lokasi Kerja</label>
+        <input name="cg_location" value="${cgEsc(cgCurrentLocation(emp))}">
+      </div>
+
+      <div class="field field-full">
+        <div class="sub-title">Remunerasi</div>
+      </div>
+
+      ${cgNumField('cg_base_salary', 'Gaji Pokok')}
+      ${cgNumField('cg_position_allowance', 'Tunjangan Jabatan')}
+      ${cgNumField('cg_performance', 'Insentif Kinerja')}
+      ${cgNumField('cg_discipline', 'Tunjangan Kedisiplinan')}
+      ${cgNumField('cg_meal', 'Tunjangan Makan')}
+      ${cgNumField('cg_thr', 'THR')}
+
+      <div class="field field-full">
+        <div class="sub-title">Data Pihak Pertama</div>
+      </div>
+
+      ${cgField('cg_rep', 'Nama Perwakilan', '')}
+      ${cgField('cg_rep_title', 'Jabatan Perwakilan', '')}
+      <div class="field field-full">
+        <label>Alamat Perusahaan</label>
+        <textarea name="cg_company_address" rows="2"></textarea>
+      </div>
+
+      <div class="field field-full">
+        <div class="sub-title">Catatan</div>
+        <textarea name="cg_notes" rows="3"
+          placeholder="Catatan internal HR / keterangan tambahan..."></textarea>
+      </div>
+
+    </div>
+  `;
+
+  const modal = openModal(
+    'Buat Kontrak',
+    body,
+    async form => {
+      const fd = new FormData(form);
+      const employeeId = fd.get('cg_employee_id');
+      const type = fd.get('cg_type');
+      const start = fd.get('cg_start_date');
+
+      if (!employeeId || !type || !start) {
+        toast('Lengkapi Karyawan, Jenis Dokumen, dan Tanggal Mulai.', 'error');
+        return false;
+      }
+
+      const emp = state.employees.find(e => e.id === employeeId);
+      if (!emp) {
+        toast('Karyawan tidak ditemukan.', 'error');
+        return false;
+      }
+
+      const payload = {
+        employee_id: employeeId,
+        contract_type: type,
+        contract_number: String(fd.get('cg_number') || '').trim() || null,
+        status: 'draft',
+        join_date: fd.get('cg_join_date') || emp.join_date || null,
+        start_date: start,
+        end_date: fd.get('cg_end_date') || null,
+        signed_date: fd.get('cg_signed_date') || null,
+        department_id: emp.department_id || null,
+        position_id: emp.position_id || null,
+        base_salary: Number(fd.get('cg_base_salary')) || null,
+        position_allowance: Number(fd.get('cg_position_allowance')) || null,
+        performance_incentive: Number(fd.get('cg_performance')) || null,
+        discipline_allowance: Number(fd.get('cg_discipline')) || null,
+        meal_allowance: Number(fd.get('cg_meal')) || null,
+        thr_amount: Number(fd.get('cg_thr')) || null,
+        notes: String(fd.get('cg_notes') || '').trim() || null
+      };
+
+      const res = await sb.from('contracts').insert(payload).select();
+      if (res.error) {
+        toast(friendlyError(res.error), 'error');
+        return false;
+      }
+
+      toast('Draft kontrak berhasil dibuat.');
+      return true;
+    },
+    'Simpan Draft',
+    () => {
+      setTimeout(() => cgOpenGenerator(), 250);
+    }
+  );
+
+  const employeeSelect = modal.querySelector('[name="cg_employee_id"]');
+  const rep = modal.querySelector('[name="cg_rep"]');
+  const repTitle = modal.querySelector('[name="cg_rep_title"]');
+  const companyAddress = modal.querySelector('[name="cg_company_address"]');
+  const department = modal.querySelector('[name="cg_department"]');
+  const position = modal.querySelector('[name="cg_position"]');
+  const location = modal.querySelector('[name="cg_location"]');
+
+  const refresh = () => {
+    const e = state.employees.find(x => x.id === employeeSelect.value);
+    if (!e) return;
+
+    const company = cgCompanyName(e);
+    const defaults = cgCompanyDefaults(company);
+
+    department.value = cgDepartment(e);
+    position.value = cgPosition(e);
+    location.value = cgCurrentLocation(e);
+
+    rep.value = defaults.representative;
+    repTitle.value = defaults.representative_title;
+    companyAddress.value = defaults.address;
+
+    const join = modal.querySelector('[name="cg_join_date"]');
+    if (!join.value && e.join_date) join.value = e.join_date;
+  };
+
+  employeeSelect.onchange = refresh;
+  refresh();
+
+  return modal;
+}
+
+function cgCollectFormData(form) {
+  const fd = new FormData(form);
+  const emp = state.employees.find(e => e.id === fd.get('cg_employee_id'));
+
+  return {
+    employee: emp,
+    company: cgCompanyName(emp),
+    type: fd.get('cg_type'),
+    number: String(fd.get('cg_number') || '').trim(),
+    joinDate: fd.get('cg_join_date') || emp?.join_date || '',
+    startDate: fd.get('cg_start_date') || '',
+    endDate: fd.get('cg_end_date') || '',
+    signedDate: fd.get('cg_signed_date') || '',
+    department: String(fd.get('cg_department') || cgDepartment(emp)).trim(),
+    position: String(fd.get('cg_position') || cgPosition(emp)).trim(),
+    supervisor: String(fd.get('cg_supervisor') || '').trim(),
+    workDays: String(fd.get('cg_work_days') || '').trim(),
+    location: String(fd.get('cg_location') || cgCurrentLocation(emp)).trim(),
+    baseSalary: Number(fd.get('cg_base_salary')) || 0,
+    positionAllowance: Number(fd.get('cg_position_allowance')) || 0,
+    performance: Number(fd.get('cg_performance')) || 0,
+    discipline: Number(fd.get('cg_discipline')) || 0,
+    meal: Number(fd.get('cg_meal')) || 0,
+    thr: Number(fd.get('cg_thr')) || 0,
+    representative: String(fd.get('cg_rep') || '').trim(),
+    representativeTitle: String(fd.get('cg_rep_title') || '').trim(),
+    companyAddress: String(fd.get('cg_company_address') || '').trim(),
+    notes: String(fd.get('cg_notes') || '').trim()
+  };
+}
+
+function cgOfferingHtml(d) {
+  return `
+    <div class="cg-doc">
+      <h1>SURAT PENAWARAN - OFFERING LETTER</h1>
+
+      <p>Dear Mr/Mrs. <b>${cgEsc(d.employee?.full_name || '')}</b></p>
+      <p>Address : ${cgEsc(d.employee?.address || '-')}<br>
+      Phone : ${cgEsc(d.employee?.phone || '-')}</p>
+
+      <p>Thank you for your interest to be part of our existing team at
+      <b>${cgEsc(d.company)}</b>. We are pleased to offer you an employment
+      with us. The terms are as follow:</p>
+
+      <table>
+        <tr><td>Posisi</td><td>${cgEsc(d.position)}</td></tr>
+        <tr><td>Department</td><td>${cgEsc(d.department)}</td></tr>
+        <tr><td>Melapor Kepada</td><td>${cgEsc(d.supervisor)}</td></tr>
+        <tr><td>Tanggal bergabung</td><td>${cgDate(d.joinDate)}</td></tr>
+        <tr><td>Status Karyawan</td><td>${d.type === 'offering_letter' ? 'Probation' : cgTypeLabel(d.type)}</td></tr>
+        <tr><td>Lokasi Kerja</td><td>${cgEsc(d.location)}</td></tr>
+        <tr><td>Hari dan Jam Kerja</td><td>${cgEsc(d.workDays)}</td></tr>
+        <tr><td>Kompensasi</td><td>${cgMoney(d.baseSalary)}</td></tr>
+        <tr><td>Insentif</td><td>${cgMoney(d.performance)}</td></tr>
+        <tr><td>Festive Allowance (THR)</td><td>${cgMoney(d.thr)}</td></tr>
+      </table>
+
+      <p>Perusahaan memberikan THR kepada Karyawan sebanyak 1 (satu)
+      bulan gaji kepada Karyawan yang telah mencapai 12 bulan masa kerja
+      atau secara prorata jika Karyawan belum mencapai masa kerja 12 bulan
+      pada Hari Raya dengan minimal 1 bulan bekerja.</p>
+
+      <p>Should the above terms be acceptable to you, please sign a copy
+      of this letter and return one copy to HRD.</p>
+
+      <div class="sign">
+        <div>${cgEsc(d.company)}<br>Menyetujui,</div>
+        <div>${cgEsc(d.representative)}<br>${cgEsc(d.representativeTitle)}</div>
+        <div>Karyawan<br><br>${cgEsc(d.employee?.full_name || '')}</div>
+      </div>
+    </div>`;
+}
+
+function cgPkwtHtml(d) {
+  const companyAddress = d.companyAddress ||
+    'Jl. Arco Raya No. 24, RT.004/001 Cipete Selatan, Cilandak, Jakarta Selatan';
+
+  return `
+    <div class="cg-doc">
+      <h1>PERJANJIAN KERJA WAKTU TERTENTU (PKWT)</h1>
+      <p class="center">No: ${cgEsc(d.number || '[NOMOR DOKUMEN]')}</p>
+
+      <p>Pada hari ini tanggal <b>${cgDate(d.signedDate)}</b> telah disepakati
+      Perjanjian Kerja Waktu Tertentu (PKWT) antara
+      <b>${cgEsc(d.company)}</b>, di ${cgEsc(companyAddress)},
+      dalam hal ini diwakili oleh:</p>
+
+      <p>1. Nama : ${cgEsc(d.representative)}<br>
+      Jabatan : ${cgEsc(d.representativeTitle)}<br>
+      Bertindak untuk dan atas nama ${cgEsc(d.company)}, untuk selanjutnya
+      disebut sebagai PIHAK PERTAMA (“Perusahaan”).</p>
+
+      <p>2. Nama : ${cgEsc(d.employee?.full_name || '')}<br>
+      ID Karyawan : ${cgEsc(d.employee?.employee_number || '-') }<br>
+      Alamat : ${cgEsc(d.employee?.address || '-')}<br>
+      Dalam hal ini bertindak untuk dan atas namanya sendiri dan selanjutnya
+      disebut sebagai PIHAK KEDUA (“Karyawan”).</p>
+
+      <p>PIHAK PERTAMA DAN PIHAK KEDUA sepakat untuk membuat Perjanjian
+      Kerja Waktu Tertentu ini untuk jangka waktu sebagaimana tertera pada
+      Pasal 2 (dua).</p>
+
+      <h2>PASAL 1 — Jabatan, Jenis Pekerjaan dan Tanggung Jawab</h2>
+      <p>PIHAK KEDUA sebagai <b>${cgEsc(d.position)}</b> pada department
+      <b>${cgEsc(d.department)}</b>, dengan tugas dan tanggung jawab sesuai
+      Job Description atau tugas-tugas yang ditentukan dan diperintahkan oleh
+      atasan langsung. Dalam menjalankan tugasnya PIHAK KEDUA bertanggung
+      jawab kepada atasan langsung.</p>
+
+      <h2>PASAL 2 — Masa Kerja</h2>
+      <p>Perjanjian Kerja Waktu Tertentu ini berlaku terhitung mulai
+      <b>${cgDate(d.startDate)}</b> dan hubungan kerja antara PIHAK PERTAMA
+      dengan PIHAK KEDUA akan berakhir pada tanggal
+      <b>${cgDate(d.endDate)}</b>.</p>
+
+      <h2>PASAL 3 — Tempat Pekerjaan</h2>
+      <p>PIHAK KEDUA akan ditempatkan di <b>${cgEsc(d.location)}</b>.
+      Namun demikian, PIHAK KEDUA bersedia melakukan perjalanan dinas bila
+      diperlukan sesuai kebutuhan pekerjaan dan perintah PIHAK PERTAMA.</p>
+
+      <h2>PASAL 4 — Penggajian</h2>
+      <p>Pembayaran upah atau penggajian akan diberikan oleh PIHAK PERTAMA
+      kepada PIHAK KEDUA dilaksanakan pada akhir bulan.</p>
+
+      <p><b>Rincian remunerasi:</b></p>
+      <table>
+        <tr><td>Gaji Pokok</td><td>${cgMoney(d.baseSalary)}</td></tr>
+        <tr><td>Tunjangan Jabatan</td><td>${cgMoney(d.positionAllowance)}</td></tr>
+        <tr><td>Insentif Kinerja</td><td>${cgMoney(d.performance)}</td></tr>
+        <tr><td>Tunjangan Kedisiplinan</td><td>${cgMoney(d.discipline)}</td></tr>
+        <tr><td>Tunjangan Makan</td><td>${cgMoney(d.meal)}</td></tr>
+        <tr><td>THR</td><td>${cgMoney(d.thr)}</td></tr>
+      </table>
+
+      <h2>PASAL 5 — Waktu Kerja</h2>
+      <p>Jam kerja resmi ditentukan sebagai berikut:</p>
+      <ol>
+        <li>Senin s/d Jumat: 08.00 s/d 17.00.</li>
+        <li>Sabtu: 08.00 s/d 15.00 waktu setempat.</li>
+        <li>Istirahat makan siang satu jam, 12.00 s/d 13.00.</li>
+        <li>Keterlambatan mengikuti ketentuan perusahaan yang berlaku.</li>
+      </ol>
+
+      <h2>PASAL 6 — Kewajiban PIHAK KEDUA</h2>
+      <ol>
+        <li>Melaksanakan tugas dan tanggung jawab dengan sebaik-baiknya,
+        jujur, disiplin dan penuh tanggung jawab.</li>
+        <li>Mentaati setiap peraturan yang dikeluarkan PIHAK PERTAMA
+        dan/atau atasan.</li>
+        <li>Merahasiakan keterangan yang diperoleh selama bekerja.</li>
+        <li>Mengembalikan dokumen dan peralatan kerja pada akhir perjanjian.</li>
+      </ol>
+
+      <h2>PASAL 7 — Izin, Cuti & Tanpa Keterangan</h2>
+      <p>Ketentuan izin, cuti, sakit dan ketidakhadiran mengikuti ketentuan
+      perusahaan yang berlaku.</p>
+
+      <h2>PASAL 8 — Tindakan Disiplin</h2>
+      <p>PIHAK PERTAMA akan mengenakan sanksi disiplin terhadap PIHAK KEDUA
+      yang melakukan pelanggaran terhadap tata tertib kerja dan peraturan
+      PIHAK PERTAMA sesuai ketentuan yang berlaku.</p>
+
+      <h2>PASAL 9 — Berakhirnya Hubungan Kerja & PHK</h2>
+      <p>Hubungan kerja dapat berakhir karena berakhirnya masa perjanjian,
+      pengunduran diri, atau keadaan lain sesuai ketentuan perjanjian dan
+      peraturan yang berlaku.</p>
+
+      <h2>PASAL 10 — Penyelesaian Perselisihan</h2>
+      <p>Bila terjadi perselisihan, kedua belah pihak berusaha menyelesaikan
+      melalui musyawarah dan bila tidak tercapai kesepakatan maka diselesaikan
+      sesuai ketentuan peraturan perundangan yang berlaku.</p>
+
+      <p>Perjanjian ini dibuat atas dasar persetujuan dan kesepakatan kedua
+      belah pihak tanpa paksaan dan ditandatangani dengan sukarela.</p>
+
+      <div class="sign">
+        <div>PIHAK PERTAMA<br>${cgEsc(d.company)}<br><br>${cgEsc(d.representative)}</div>
+        <div>PIHAK KEDUA<br><br><br>${cgEsc(d.employee?.full_name || '')}</div>
+      </div>
+    </div>`;
+}
+
+function cgPkwttHtml(d) {
+  const companyAddress = d.companyAddress || '';
+
+  return `
+    <div class="cg-doc">
+      <h1>PERJANJIAN KERJA WAKTU TIDAK TERTENTU</h1>
+      <p class="center">No. ${cgEsc(d.number || '[NOMOR DOKUMEN]')}</p>
+
+      <p>Pada hari ini, tanggal <b>${cgDate(d.signedDate)}</b>, di kantor
+      <b>${cgEsc(d.company)}</b>, yang bertanda tangan di bawah ini:</p>
+
+      <p><b>PIHAK PERTAMA</b><br>
+      Nama : ${cgEsc(d.representative)}<br>
+      Pekerjaan/Jabatan : ${cgEsc(d.representativeTitle)}<br>
+      Alamat : ${cgEsc(companyAddress)}</p>
+
+      <p><b>PIHAK KEDUA</b><br>
+      Nama : ${cgEsc(d.employee?.full_name || '')}<br>
+      ID Karyawan : ${cgEsc(d.employee?.employee_number || '-')}<br>
+      Alamat : ${cgEsc(d.employee?.address || '-')}</p>
+
+      <p>Kedua belah pihak sepakat untuk mengadakan perjanjian kerja waktu
+      tidak tertentu dengan syarat-syarat dan ketentuan sebagai berikut:</p>
+
+      <h2>PASAL 1 — KETENTUAN KHUSUS</h2>
+      <ol>
+        <li>Status: Karyawan PKWTT.</li>
+        <li>Jabatan: ${cgEsc(d.position)}.</li>
+        <li>Tgl Masuk: ${cgDate(d.joinDate)}.</li>
+      </ol>
+
+      <h2>PASAL 2 — KEPEGAWAIAN</h2>
+      <p>Pihak Kedua bersedia ditempatkan sesuai kebutuhan organisasi Pihak
+      Pertama. Waktu kerja disesuaikan dengan waktu kerja yang ditetapkan
+      Pihak Pertama sesuai jabatan, jenis pekerjaan dan lokasi penempatan.</p>
+
+      <h2>PASAL 3 — KEWAJIBAN DAN TANGGUNG-JAWAB KARYAWAN</h2>
+      <ol>
+        <li>Melaksanakan seluruh kewajiban berdasarkan tugas dan tanggung jawab
+        jabatan serta mematuhi peraturan kerja perusahaan.</li>
+        <li>Menjaga kerahasiaan perusahaan dan rahasia jabatan.</li>
+        <li>Mematuhi ketentuan jam kerja yang berlaku.</li>
+        <li>Memberitahukan pengunduran diri sesuai prosedur perusahaan.</li>
+      </ol>
+
+      <h2>PASAL 4 — KEWAJIBAN DAN TANGGUNG JAWAB PERUSAHAAN</h2>
+      <ol>
+        <li>Memberikan upah berdasarkan ketentuan yang disepakati.</li>
+        <li>Memperhatikan kesejahteraan dan keselamatan kerja.</li>
+        <li>Mengembangkan potensi karyawan sesuai kemampuan dan kondisi
+        perusahaan.</li>
+        <li>Melaksanakan peraturan ketenagakerjaan sesuai ketentuan yang berlaku.</li>
+      </ol>
+
+      <p><b>Rincian remunerasi:</b></p>
+      <table>
+        <tr><td>Gaji Pokok</td><td>${cgMoney(d.baseSalary)}</td></tr>
+        <tr><td>Tunjangan Jabatan</td><td>${cgMoney(d.positionAllowance)}</td></tr>
+        <tr><td>Insentif Kinerja</td><td>${cgMoney(d.performance)}</td></tr>
+        <tr><td>Tunjangan Kedisiplinan</td><td>${cgMoney(d.discipline)}</td></tr>
+        <tr><td>Tunjangan Makan</td><td>${cgMoney(d.meal)}</td></tr>
+        <tr><td>THR</td><td>${cgMoney(d.thr)}</td></tr>
+      </table>
+
+      <h2>PASAL 5 — LAIN-LAIN</h2>
+      <p>Bilamana terdapat hal-hal yang belum diatur atau tercantum dalam
+      perjanjian ini, akan ditetapkan secara musyawarah mufakat oleh kedua
+      belah pihak dan disesuaikan dengan peraturan perundang-undangan yang
+      berlaku.</p>
+
+      <p>Setelah kedua belah pihak membaca dengan seksama serta memahami isi
+      ketentuan perjanjian kerja ini, perjanjian dibuat rangkap 2 (dua) dan
+      masing-masing mempunyai kekuatan hukum yang sama.</p>
+
+      <div class="sign">
+        <div>PIHAK PERTAMA<br>${cgEsc(d.company)}<br><br>${cgEsc(d.representative)}</div>
+        <div>PIHAK KEDUA<br><br><br>${cgEsc(d.employee?.full_name || '')}</div>
+      </div>
+    </div>`;
+}
+
+function cgAmendmentHtml(d) {
+  return `
+    <div class="cg-doc">
+      <h1>AMANDemen PERJANJIAN KERJA WAKTU TERTENTU</h1>
+      <p class="center">No. ${cgEsc(d.number || '[NOMOR DOKUMEN]')}</p>
+
+      <p>Amandemen ini merupakan perubahan atas Perjanjian Kerja Waktu Tertentu
+      antara <b>${cgEsc(d.company)}</b> sebagai PIHAK PERTAMA dan
+      <b>${cgEsc(d.employee?.full_name || '')}</b> sebagai PIHAK KEDUA.</p>
+
+      <h2>PERUBAHAN</h2>
+      <table>
+        <tr><td>Karyawan</td><td>${cgEsc(d.employee?.full_name || '')}</td></tr>
+        <tr><td>Jabatan</td><td>${cgEsc(d.position)}</td></tr>
+        <tr><td>Departemen</td><td>${cgEsc(d.department)}</td></tr>
+        <tr><td>Periode Baru</td><td>${cgDate(d.startDate)} s/d ${cgDate(d.endDate)}</td></tr>
+        <tr><td>Lokasi Kerja</td><td>${cgEsc(d.location)}</td></tr>
+      </table>
+
+      <p>Ketentuan lain dalam perjanjian sebelumnya yang tidak diubah melalui
+      amandemen ini tetap berlaku sesuai dokumen sumber yang disepakati para
+      pihak.</p>
+
+      <div class="sign">
+        <div>PIHAK PERTAMA<br>${cgEsc(d.company)}<br><br>${cgEsc(d.representative)}</div>
+        <div>PIHAK KEDUA<br><br><br>${cgEsc(d.employee?.full_name || '')}</div>
+      </div>
+    </div>`;
+}
+
+function cgBuildHtml(d) {
+  if (d.type === 'pkwt') return cgPkwtHtml(d);
+  if (d.type === 'pkwtt') return cgPkwttHtml(d);
+  if (d.type === 'amendment') return cgAmendmentHtml(d);
+  return cgOfferingHtml(d);
+}
+
+function cgPrintCss() {
+  return `
+    <style>
+      @page { size: A4; margin: 22mm 20mm 20mm 25mm; }
+      body { font-family: Arial, sans-serif; font-size: 11pt; line-height: 1.45; color:#111; }
+      .cg-doc { max-width: 180mm; margin:auto; }
+      h1 { text-align:center; font-size:16pt; margin:0 0 18px; }
+      h2 { font-size:12pt; margin:18px 0 8px; }
+      p { margin:0 0 9px; text-align:justify; }
+      .center { text-align:center; }
+      table { width:100%; border-collapse:collapse; margin:12px 0; }
+      td { border:1px solid #777; padding:6px 8px; vertical-align:top; }
+      td:first-child { width:32%; font-weight:600; }
+      li { margin-bottom:5px; }
+      .sign { display:grid; grid-template-columns:1fr 1fr; gap:30px; margin-top:55px; text-align:center; }
+      @media print { .no-print { display:none!important; } }
+    </style>`;
+}
+
+function cgOpenGenerator() {
+  const body = `
+    <div class="info-box">
+      Pilih karyawan dan dokumen yang ingin dibuat. Setelah preview,
+      tersedia tombol <b>Export Word</b> dan <b>Export PDF</b>.
+    </div>
+
+    <div class="modal-grid">
+      <div class="field field-full">
+        <label>Karyawan *</label>
+        <select name="cg_employee_id" required>
+          <option value="">Pilih karyawan</option>
+          ${cgEmployeeOptions('')}
+        </select>
+      </div>
+
+      <div class="field">
+        <label>Jenis Dokumen *</label>
+        <select name="cg_type" required>
+          <option value="offering_letter">Offering Letter</option>
+          <option value="pkwt">PKWT</option>
+          <option value="pkwtt">PKWTT</option>
+          <option value="amendment">Amandemen PKWT</option>
+        </select>
+      </div>
+
+      ${cgField('cg_number', 'No. Dokumen / Kontrak')}
+      ${cgDateField('cg_join_date', 'Tanggal Bergabung')}
+      ${cgDateField('cg_start_date', 'Tanggal Mulai', '', true)}
+      ${cgDateField('cg_end_date', 'Tanggal Berakhir')}
+      ${cgDateField('cg_signed_date', 'Tanggal Tanda Tangan')}
+
+      ${cgField('cg_department', 'Departemen')}
+      ${cgField('cg_position', 'Jabatan')}
+      ${cgField('cg_supervisor', 'Melapor Kepada', 'PIC (Person In Charge) - SPV/Asst.')}
+      ${cgField('cg_work_days', 'Hari & Jam Kerja', '6 (Enam) Hari kerja, 1 (Satu) Hari Libur')}
+      <div class="field field-full">
+        <label>Lokasi Kerja</label>
+        <input name="cg_location">
+      </div>
+
+      <div class="field field-full"><div class="sub-title">Remunerasi</div></div>
+      ${cgNumField('cg_base_salary', 'Gaji Pokok')}
+      ${cgNumField('cg_position_allowance', 'Tunjangan Jabatan')}
+      ${cgNumField('cg_performance', 'Insentif Kinerja')}
+      ${cgNumField('cg_discipline', 'Tunjangan Kedisiplinan')}
+      ${cgNumField('cg_meal', 'Tunjangan Makan')}
+      ${cgNumField('cg_thr', 'THR')}
+
+      <div class="field field-full"><div class="sub-title">Pihak Pertama</div></div>
+      ${cgField('cg_rep', 'Nama Perwakilan')}
+      ${cgField('cg_rep_title', 'Jabatan Perwakilan')}
+      <div class="field field-full">
+        <label>Alamat Perusahaan</label>
+        <textarea name="cg_company_address" rows="2"></textarea>
+      </div>
+    </div>
+  `;
+
+  const modal = openModal(
+    'Buat & Export Kontrak',
+    body,
+    async form => {
+      const d = cgCollectFormData(form);
+
+      if (!d.employee || !d.type || !d.startDate) {
+        toast('Lengkapi Karyawan, Jenis Dokumen, dan Tanggal Mulai.', 'error');
+        return false;
+      }
+
+      const preview = `
+        <div class="section">
+          <div class="section-head">
+            <h2>Preview Dokumen</h2>
+            <div class="row-actions">
+              <button type="button" class="btn btn-light" onclick="cgExportWord()">📄 Export Word</button>
+              <button type="button" class="btn btn-primary" onclick="cgExportPdf()">📕 Export PDF</button>
+            </div>
+          </div>
+          <div id="cgPreview">${cgBuildHtml(d)}</div>
+        </div>`;
+
+      modal.querySelector('.modal').innerHTML = `
+        <div class="section-head">
+          <h2>Preview ${cgEsc(cgTypeLabel(d.type))}</h2>
+          <button type="button" class="btn btn-light" data-close>Tutup</button>
+        </div>
+        ${preview}`;
+
+      modal.querySelectorAll('[data-close]').forEach(b => b.onclick = () => modal.remove());
+      window._cgExportData = d;
+      return false;
+    },
+    'Preview'
+  );
+
+  const refresh = () => {
+    const e = state.employees.find(x =>
+      x.id === modal.querySelector('[name="cg_employee_id"]').value
+    );
+    if (!e) return;
+
+    const company = cgCompanyName(e);
+    const defaults = cgCompanyDefaults(company);
+
+    modal.querySelector('[name="cg_department"]').value = cgDepartment(e);
+    modal.querySelector('[name="cg_position"]').value = cgPosition(e);
+    modal.querySelector('[name="cg_location"]').value = cgCurrentLocation(e);
+    modal.querySelector('[name="cg_rep"]').value = defaults.representative;
+    modal.querySelector('[name="cg_rep_title"]').value = defaults.representative_title;
+    modal.querySelector('[name="cg_company_address"]').value = defaults.address;
+
+    if (e.join_date)
+      modal.querySelector('[name="cg_join_date"]').value = e.join_date;
+  };
+
+  modal.querySelector('[name="cg_employee_id"]').onchange = refresh;
+  refresh();
+  return modal;
+}
+
+async function cgExportWord() {
+  const d = window._cgExportData;
+  if (!d) {
+    toast('Preview dokumen belum tersedia.', 'error');
+    return;
+  }
+
+  try {
+    toast('Menyiapkan file Word...');
+
+    const converter = await cgLoadDocxConverter();
+
+    const html = `
+      <!doctype html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        ${cgPrintCss()}
+      </head>
+      <body>${cgBuildHtml(d)}</body>
+      </html>`;
+
+    const blob = await converter.toDocx(html);
+
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+
+    a.href = url;
+    a.download =
+      `${d.type}_${(d.employee?.full_name || 'karyawan').replace(/[^a-z0-9]+/gi,'_')}.docx`;
+
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+
+    toast('File Word berhasil dibuat.');
+  } catch (err) {
+    console.error(err);
+    toast('Export Word gagal: ' + (err?.message || 'error tidak diketahui'), 'error');
+  }
+}
+
+function cgExportPdf() {
+  const d = window._cgExportData;
+  if (!d) {
+    toast('Preview dokumen belum tersedia.', 'error');
+    return;
+  }
+
+  const w = window.open('', '_blank');
+
+  if (!w) {
+    toast('Browser memblokir jendela PDF. Izinkan pop-up untuk website ini.', 'error');
+    return;
+  }
+
+  w.document.open();
+  w.document.write(`
+    <!doctype html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <title>${cgEsc(cgTypeLabel(d.type))} - ${cgEsc(d.employee?.full_name || '')}</title>
+      ${cgPrintCss()}
+    </head>
+    <body>${cgBuildHtml(d)}</body>
+    </html>`);
+  w.document.close();
+
+  w.onload = () => {
+    w.focus();
+    w.print();
+  };
+}
+
+
+/* ---------- Override halaman Kontrak ---------- */
+/* Fungsi ini sengaja diletakkan di akhir app.js agar menggantikan
+   tampilan contracts() lama tanpa mengganggu modul lain. */
+
+function contracts() {
+  const rows = state.contracts || [];
+  const today = todayJakarta();
+
+  const expSoon = c => {
+    const n = daysUntil(c.end_date);
+    return c.status === 'active' && n !== null && n >= 0 && n <= 30;
+  };
+
+  $('#content').innerHTML = `
+    <div class="section">
+
+      <div class="section-head">
+        <div>
+          <h2>Daftar Kontrak</h2>
+          <div class="muted">${rows.length} dokumen kontrak tersimpan</div>
+        </div>
+
+        <div class="row-actions">
+          <button class="btn btn-light" onclick="importContractDocument()">
+            📄 Import Dokumen
+          </button>
+
+          <button class="btn btn-primary" onclick="cgOpenGenerator()">
+            📝 Buat Kontrak
+          </button>
+
+          <button class="btn btn-light" onclick="contractForm()">
+            + Tambah Kontrak
+          </button>
+        </div>
+      </div>
+
+      <div class="cards" style="margin-bottom:14px">
+        <div class="card">
+          <div class="muted">Aktif</div>
+          <div class="metric">${rows.filter(c => c.status === 'active').length}</div>
+        </div>
+
+        <div class="card">
+          <div class="muted">Berakhir ≤ 30 Hari</div>
+          <div class="metric">${rows.filter(expSoon).length}</div>
+        </div>
+
+        <div class="card">
+          <div class="muted">Sudah Berakhir</div>
+          <div class="metric">${rows.filter(c => c.end_date && c.end_date < today).length}</div>
+        </div>
+
+        <div class="card">
+          <div class="muted">Draft</div>
+          <div class="metric">${rows.filter(c => c.status === 'draft').length}</div>
+        </div>
+      </div>
+
+      ${rows.length ? `
+        <div class="table-wrap">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Karyawan</th>
+                <th>No. Dokumen</th>
+                <th>Jenis</th>
+                <th>Mulai</th>
+                <th>Berakhir</th>
+                <th>Status</th>
+                <th>Aksi</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              ${rows.map(c => {
+                const e = state.employees.find(x => x.id === c.employee_id);
+                const n = daysUntil(c.end_date);
+
+                return `
+                  <tr>
+                    <td>
+                      <b>${esc(e?.full_name || '-')}</b>
+                      <div class="muted">${esc(e?.employee_number || '')}</div>
+                    </td>
+
+                    <td>${esc(c.contract_number || '-')}</td>
+
+                    <td>${esc(cgTypeLabel(c.contract_type))}</td>
+
+                    <td>${fmtDate(c.start_date)}</td>
+
+                    <td>
+                      ${fmtDate(c.end_date)}
+                      ${n !== null
+                        ? `<span class="badge ${n < 0 ? 'badge-red' : n <= 30 ? 'badge-yellow' : 'badge-green'}">
+                            ${n < 0 ? 'Lewat' : n + ' hari'}
+                           </span>`
+                        : ''}
+                    </td>
+
+                    <td>${contractStatusBadge(c.status)}</td>
+
+                    <td>
+                      <div class="row-actions">
+                        <button class="btn btn-light btn-sm"
+                          onclick="contractForm('${esc(c.id)}')">
+                          Edit
+                        </button>
+
+                        ${c.document_path
+                          ? `<button class="btn btn-light btn-sm"
+                              onclick="contractOpenDocument('${esc(c.document_path)}')">
+                              Dokumen
+                            </button>`
+                          : ''}
+                      </div>
+                    </td>
+                  </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      ` : `
+        <div class="card empty">
+          Belum ada kontrak.
+        </div>
+      `}
+    </div>`;
+}
