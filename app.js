@@ -1529,23 +1529,23 @@ init();
    ========================================================= */
 
 async function cgLoadDocxConverter() {
-  if (window.htmlDocx) return window.htmlDocx;
+  if (window.docshift) return window.docshift;
 
   return new Promise((resolve, reject) => {
-    const old = document.querySelector('script[data-htmldocx="1"]');
+    const old = document.querySelector('script[data-docshift="1"]');
 
     if (old) {
-      old.addEventListener('load', () => window.htmlDocx ? resolve(window.htmlDocx) : reject(new Error('Library Word tidak tersedia.')));
+      old.addEventListener('load', () => resolve(window.docshift));
       old.addEventListener('error', () => reject(new Error('Library Word gagal dimuat.')));
       return;
     }
 
     const s = document.createElement('script');
-    s.src = 'https://cdn.jsdelivr.net/npm/html-docx-js@0.3.1/dist/html-docx.js';
-    s.dataset.htmldocx = '1';
+    s.src = 'https://cdn.jsdelivr.net/npm/docshift@0.0.73/dist/docshift.min.js';
+    s.dataset.docshift = '1';
 
-    s.onload = () => window.htmlDocx
-      ? resolve(window.htmlDocx)
+    s.onload = () => window.docshift
+      ? resolve(window.docshift)
       : reject(new Error('Library Word tidak tersedia.'));
 
     s.onerror = () => reject(new Error('Library Word gagal dimuat.'));
@@ -1855,11 +1855,18 @@ function cgCollectFormData(form) {
     representative: String(fd.get('cg_rep') || '').trim(),
     representativeTitle: String(fd.get('cg_rep_title') || '').trim(),
     companyAddress: String(fd.get('cg_company_address') || '').trim(),
-    notes: String(fd.get('cg_notes') || '').trim()
+    notes: String(fd.get('cg_notes') || '').trim(),
+    statusText: String(fd.get('cg_status_text') || '').trim(),
+    birthInfo: String(fd.get('cg_birth_info') || '').trim(),
+    gender: String(fd.get('cg_gender') || '').trim(),
+    previousContractNumber: String(fd.get('cg_previous_contract_number') || '').trim(),
+    previousStartDate: fd.get('cg_previous_start_date') || '',
+    previousEndDate: fd.get('cg_previous_end_date') || ''
   };
 }
 
 function cgOfferingHtml(d) {
+  const status = d.statusText || 'Probation - 3 Bulan';
   return `
     <div class="cg-doc">
       <h1>SURAT PENAWARAN - OFFERING LETTER</h1>
@@ -1870,33 +1877,37 @@ function cgOfferingHtml(d) {
 
       <p>Thank you for your interest to be part of our existing team at
       <b>${cgEsc(d.company)}</b>. We are pleased to offer you an employment
-      with us. The terms are as follow:</p>
+      with us. The terms are as follow: / Terima kasih atas minat Anda untuk
+      menjadi bagian dari tim kami di <b>CV. Zayco Boga Alifa & It’s My Cake</b>.
+      Dengan senang hati kami menawarkan Anda pekerjaan bersama kami dengan
+      ketentuan sebagai berikut:</p>
 
       <table>
         <tr><td>Posisi</td><td>${cgEsc(d.position)}</td></tr>
         <tr><td>Department</td><td>${cgEsc(d.department)}</td></tr>
         <tr><td>Melapor Kepada</td><td>${cgEsc(d.supervisor)}</td></tr>
         <tr><td>Tanggal bergabung</td><td>${cgDate(d.joinDate)}</td></tr>
-        <tr><td>Status Karyawan</td><td>${d.type === 'offering_letter' ? 'Probation' : cgTypeLabel(d.type)}</td></tr>
+        <tr><td>Status Karyawan</td><td>${cgEsc(status)}</td></tr>
         <tr><td>Lokasi Kerja</td><td>${cgEsc(d.location)}</td></tr>
         <tr><td>Hari dan Jam Kerja</td><td>${cgEsc(d.workDays)}</td></tr>
         <tr><td>Kompensasi</td><td>${cgMoney(d.baseSalary)}</td></tr>
-        <tr><td>Insentif</td><td>${cgMoney(d.performance)}</td></tr>
-        <tr><td>Festive Allowance (THR)</td><td>${cgMoney(d.thr)}</td></tr>
+        <tr><td>Insentif</td><td>${d.performance ? cgMoney(d.performance) : '-'}</td></tr>
+        <tr><td>Festive Allowance (THR)</td><td>${d.thr ? cgMoney(d.thr) : '-'}</td></tr>
       </table>
 
-      <p>Perusahaan memberikan THR kepada Karyawan sebanyak 1 (satu)
-      bulan gaji kepada Karyawan yang telah mencapai 12 bulan masa kerja
-      atau secara prorata jika Karyawan belum mencapai masa kerja 12 bulan
-      pada Hari Raya dengan minimal 1 bulan bekerja.</p>
+      <p>Perusahaan memberikan THR kepada Karyawan sebanyak 1 (satu) bulan
+      gaji kepada Karyawan yang telah mencapai 12 bulan masa kerja atau secara
+      prorata jika Karyawan belum mencapai masa kerja 12 bulan pada Hari Raya
+      dengan minimal 1 bulan bekerja.</p>
 
-      <p>Should the above terms be acceptable to you, please sign a copy
-      of this letter and return one copy to HRD.</p>
+      <p>Should the above terms be acceptable to you, please sign a copy of this
+      letter and return one copy to HRD. / Apabila Anda setuju dengan ketentuan
+      tersebut diatas, mohon untuk menandatangani surat ini dan mengirimkan satu
+      salinan ke HRD.</p>
 
       <div class="sign">
-        <div>${cgEsc(d.company)}<br>Menyetujui,</div>
-        <div>${cgEsc(d.representative)}<br>${cgEsc(d.representativeTitle)}</div>
-        <div>Karyawan<br><br>${cgEsc(d.employee?.full_name || '')}</div>
+        <div>${cgEsc(d.company)}<br>Menyetujui,<br><br>${cgEsc(d.representative)}<br>${cgEsc(d.representativeTitle)}</div>
+        <div>Karyawan<br><br><br>${cgEsc(d.employee?.full_name || '')}</div>
       </div>
     </div>`;
 }
@@ -1904,6 +1915,7 @@ function cgOfferingHtml(d) {
 function cgPkwtHtml(d) {
   const companyAddress = d.companyAddress ||
     'Jl. Arco Raya No. 24, RT.004/001 Cipete Selatan, Cilandak, Jakarta Selatan';
+  const previousText = d.previousContractNumber ? ` No. ${cgEsc(d.previousContractNumber)}` : '';
 
   return `
     <div class="cg-doc">
@@ -1911,47 +1923,47 @@ function cgPkwtHtml(d) {
       <p class="center">No: ${cgEsc(d.number || '[NOMOR DOKUMEN]')}</p>
 
       <p>Pada hari ini tanggal <b>${cgDate(d.signedDate)}</b> telah disepakati
-      Perjanjian Kerja Waktu Tertentu (PKWT) antara
-      <b>${cgEsc(d.company)}</b>, di ${cgEsc(companyAddress)},
+      Perjanjian Kerja Waktu Tertentu (PKWT) antara CV. Zayco Boga Alifa,
+      sebuah usaha mikro kecil dan menengah di ${cgEsc(companyAddress)}
       dalam hal ini diwakili oleh:</p>
 
       <p>1. Nama : ${cgEsc(d.representative)}<br>
       Jabatan : ${cgEsc(d.representativeTitle)}<br>
-      Bertindak untuk dan atas nama ${cgEsc(d.company)}, untuk selanjutnya
-      disebut sebagai PIHAK PERTAMA (“Perusahaan”).</p>
+      Bertindak untuk dan atas nama CV Zayco Boga Alifa untuk selanjutnya dalam
+      hal ini disebut sebagai : <b>PIHAK PERTAMA (“Perusahaan”)</b></p>
 
       <p>2. Nama : ${cgEsc(d.employee?.full_name || '')}<br>
-      ID Karyawan : ${cgEsc(d.employee?.employee_number || '-') }<br>
-      Alamat : ${cgEsc(d.employee?.address || '-')}<br>
+      Tempat &amp; Tgl. Lahir : ${cgEsc(d.birthInfo || '-')}<br>
+      Alamat Tempat Tinggal : ${cgEsc(d.employee?.address || '-')}<br>
       Dalam hal ini bertindak untuk dan atas namanya sendiri dan selanjutnya
-      disebut sebagai PIHAK KEDUA (“Karyawan”).</p>
+      disebut sebagai : <b>PIHAK KEDUA (“Karyawan”)</b></p>
 
-      <p>PIHAK PERTAMA DAN PIHAK KEDUA sepakat untuk membuat Perjanjian
-      Kerja Waktu Tertentu ini untuk jangka waktu sebagaimana tertera pada
-      Pasal 2 (dua).</p>
+      <p><b>PIHAK PERTAMA DAN PIHAK KEDUA</b> sepakat untuk membuat Perjanjian
+      Kerja Waktu Tertentu ini untuk jangka waktu yang sebagaimana tertera pada
+      pasal 2 (dua).</p>
 
       <h2>PASAL 1 — Jabatan, Jenis Pekerjaan dan Tanggung Jawab</h2>
       <p>PIHAK KEDUA sebagai <b>${cgEsc(d.position)}</b> pada department
       <b>${cgEsc(d.department)}</b>, dengan tugas dan tanggung jawab sesuai
       Job Description atau tugas-tugas yang ditentukan dan diperintahkan oleh
-      atasan langsung. Dalam menjalankan tugasnya PIHAK KEDUA bertanggung
-      jawab kepada atasan langsung.</p>
+      atasan langsung. Dalam menjalankan tugasnya PIHAK KEDUA bertanggung jawab
+      kepada (Direktur dan atau Head division).</p>
 
       <h2>PASAL 2 — Masa Kerja</h2>
       <p>Perjanjian Kerja Waktu Tertentu ini berlaku terhitung mulai
       <b>${cgDate(d.startDate)}</b> dan hubungan kerja antara PIHAK PERTAMA
-      dengan PIHAK KEDUA akan berakhir pada tanggal
+      dengan PIHAK KEDUA akan berakhir secara hukum pada tanggal
       <b>${cgDate(d.endDate)}</b>.</p>
 
       <h2>PASAL 3 — Tempat Pekerjaan</h2>
-      <p>PIHAK KEDUA akan ditempatkan di <b>${cgEsc(d.location)}</b>.
-      Namun demikian, PIHAK KEDUA bersedia melakukan perjalanan dinas bila
-      diperlukan sesuai kebutuhan pekerjaan dan perintah PIHAK PERTAMA.</p>
+      <p>PIHAK KEDUA akan ditempatkan di <b>${cgEsc(d.location)}</b> yang
+      berlokasi di ${cgEsc(companyAddress)}, Namun demikian, PIHAK KEDUA
+      bersedia untuk melakukan perjalanan dinas bilamana diperlukan sesuai
+      kebutuhan pekerjaan sesuai perintah PIHAK PERTAMA.</p>
 
       <h2>PASAL 4 — Penggajian</h2>
       <p>Pembayaran upah atau penggajian akan diberikan oleh PIHAK PERTAMA
-      kepada PIHAK KEDUA dilaksanakan pada akhir bulan.</p>
-
+      kepada PIHAK KEDUA dilaksanakan di Akhir bulan.</p>
       <p><b>Rincian remunerasi:</b></p>
       <table>
         <tr><td>Gaji Pokok</td><td>${cgMoney(d.baseSalary)}</td></tr>
@@ -1965,47 +1977,129 @@ function cgPkwtHtml(d) {
       <h2>PASAL 5 — Waktu Kerja</h2>
       <p>Jam kerja resmi ditentukan sebagai berikut:</p>
       <ol>
-        <li>Senin s/d Jumat: 08.00 s/d 17.00.</li>
-        <li>Sabtu: 08.00 s/d 15.00 waktu setempat.</li>
-        <li>Istirahat makan siang satu jam, 12.00 s/d 13.00.</li>
-        <li>Keterlambatan mengikuti ketentuan perusahaan yang berlaku.</li>
+        <li>Senin s/d Jumat : dari jam 08.00 s/d 17.00.</li>
+        <li>Sabtu : dari jam 08.00 s/d 15:00 waktu setempat.</li>
+        <li>Istirahat makan siang adalah satu jam dari jam 12.00 s/d 13.00 waktu setempat.</li>
+        <li>Keterlambatan 08:01 dan denda maksimal potongan Rp. 20.000 pada salary.</li>
       </ol>
 
       <h2>PASAL 6 — Kewajiban PIHAK KEDUA</h2>
       <ol>
-        <li>Melaksanakan tugas dan tanggung jawab dengan sebaik-baiknya,
-        jujur, disiplin dan penuh tanggung jawab.</li>
-        <li>Mentaati setiap peraturan yang dikeluarkan PIHAK PERTAMA
-        dan/atau atasan.</li>
-        <li>Merahasiakan keterangan yang diperoleh selama bekerja.</li>
-        <li>Mengembalikan dokumen dan peralatan kerja pada akhir perjanjian.</li>
+        <li>PIHAK KEDUA wajib melaksanakan tugas, tanggung jawab yang dibebankan
+        oleh atasan dengan sebaik-baiknya, jujur, disiplin dan penuh tanggung jawab.</li>
+        <li>PIHAK KEDUA wajib mentaati setiap peraturan-peraturan yang dikeluarkan
+        oleh PIHAK PERTAMA dan/atau atasan baik lisan maupun tertulis.</li>
+        <li>PIHAK KEDUA wajib merahasiakan semua keterangan-keterangan yang
+        diperolehnya selama bekerja dan tidak boleh memberikan keterangan-keterangan
+        tersebut kepada pihak lain tanpa persetujuan terlebih dahulu dari PIHAK PERTAMA.</li>
+        <li>PIHAK KEDUA wajib mengembalikan semua dokumen-dokumen, peralatan-peralatan
+        kerja yang diberikan kepadanya selama bekerja pada akhir Perjanjian Kerja ini.</li>
+        <li>PIHAK KEDUA wajib datang tepat waktu sesuai dengan aturan jam kerja yang
+        tertuang dalam pasal 5. Apabila PIHAK KEDUA datang diatas waktu yang ditentukan
+        maka akan ada sangsi yang berlaku.</li>
       </ol>
 
-      <h2>PASAL 7 — Izin, Cuti & Tanpa Keterangan</h2>
-      <p>Ketentuan izin, cuti, sakit dan ketidakhadiran mengikuti ketentuan
-      perusahaan yang berlaku.</p>
+      <h2>PASAL 7 — Izin, Cuti &amp; Tanpa Keterangan</h2>
+      <p>PIHAK KEDUA yang berhak mendapatkan cuti apabila sudah menjalani masa
+      kerja salam 12 bulan terhitung dari tanggal awal kontrak di perusahaan.</p>
+      <p>PIHAK KEDUA wajib memberikan informasi apabila berhalangan hadir dalam
+      kerja. Jika izin karena sakit maka wajib melampirkan surat keterangan sakit
+      dari dokter dan tidak mengurangi hak dari karyawan.</p>
+      <p>Apabila PIHAK KEDUA tidak hadir tanpa keterangan maka akan diberikan
+      sangsi berupa pemotongan upah sesuai dengan ketentuan perusahaan.</p>
+      <p><b>Ketentuan Hak cuti untuk PIHAK KEDUA ialah:</b></p>
+      <ol type="a">
+        <li>Masa kerja 1 tahun : 7 hari</li>
+        <li>Masa kerja 3 tahun : 9 hari</li>
+        <li>Masa Kerja 5 tahun : 10 hari</li>
+        <li>Masa kerja 6 tahun keatas: 12 hari</li>
+      </ol>
+      <p><b>Larangan – Larangan</b></p>
+      <p>PIHAK KEDUA dilarang melakukan perbuatan-perbuatan/tindakan-tindakan
+      yang bertentangan dengan peraturan-peraturan tata tertib, dan ketentuan-ketentuan
+      serta norma-norma yang berlaku baik dalam perusahaan maupun dalam Peraturan
+      dan Undang-Undang Ketenagakerjaan serta Hukum Negara Republik Indonesia.</p>
+      <p><b>Seragam</b></p>
+      <p>PIHAK KEDUA wajib menggunakan seragam kerja sesuai dengan harinya seperti:</p>
+      <ol type="a">
+        <li>Senin-Selasa : Kemeja Zayco (warna Hijau keabu-abuan)</li>
+        <li>Rabu-Kamis : Pria - Polo Shirt Zayco (Warna Navy); Wanita – Kemeja Zayco (Navy)</li>
+        <li>Jum’at : Batik</li>
+        <li>Sabtu : Bebas Sopan (Pria dilarang menggunakan Kaos Oblong)</li>
+      </ol>
+      <p>Seragam yang disediakan oleh PIHAK PERTAMA merupakan asset perusahaan
+      dan bukan menjadi kepemilikan PIHAK KEDUA. Apabila hubungan kerja berakhir
+      maka PIHAK KEDUA wajib mengembalikan kepada PIHAK PERTAMA.</p>
 
       <h2>PASAL 8 — Tindakan Disiplin</h2>
-      <p>PIHAK PERTAMA akan mengenakan sanksi disiplin terhadap PIHAK KEDUA
-      yang melakukan pelanggaran terhadap tata tertib kerja dan peraturan
-      PIHAK PERTAMA sesuai ketentuan yang berlaku.</p>
+      <p>PIHAK PERTAMA akan mengenakan sanksi disiplin terhadap PIHAK KEDUA yang
+      melakukan pelanggaran-pelanggaran terhadap tata tertib kerja dan peraturan-peraturan
+      PIHAK PERTAMA, sesuai dengan Undang-undang, Ketentuan-ketentuan dan
+      peraturan-peraturan ketenagakerjaan yang berlaku.</p>
+      <ol type="a">
+        <li>Apabila PIHAK KEDUA melakukan tindakan indisipliner seperti tidak masuk
+        bekerja, tidak tercapainya target pekerjaan, malas. PIHAK PERTAMA akan
+        melakukan SURAT PERINGATAN I dengan dilakukannya pemantauan selama 1 bulan
+        dan berlaku 3 bulan pada saat surat itu diterbitkan.</li>
+        <li>Jika PIHAK KEDUA mengulangi kesalahan yang sama maka akan dinaikan
+        menjadi SURAT PERINGATAN II dengan ketentuan yang akan mempengaruhi
+        pendapatan dan kesepakatan antara PIHAK PERTAMA &amp; PIHAK KEDUA.</li>
+        <li>Jika PIHAK KEDUA mengulangi kesalahan yang sama maka akan dinaikan
+        menjadi SURAT PERINGATAN III yang mana berakhirnya kesepakatan ini tanpa
+        adanya kewajiban PIHAK PERTAMA untuk membayar kompensasi apapun.</li>
+      </ol>
+      <p>PIHAK PERTAMA berhak mengeluarkan SURAT PERINGATAN I &amp; TERAKHIR
+      apabila PIHAK KEDUA melakukan tindakan yang tidak bisa ditoleransi atau fatal.</p>
 
-      <h2>PASAL 9 — Berakhirnya Hubungan Kerja & PHK</h2>
-      <p>Hubungan kerja dapat berakhir karena berakhirnya masa perjanjian,
-      pengunduran diri, atau keadaan lain sesuai ketentuan perjanjian dan
-      peraturan yang berlaku.</p>
+      <h2>PASAL 9 — Berakhirnya Hubungan Kerja &amp; Pemutusan Hubungan Kerja</h2>
+      <ol>
+        <li>PIHAK KEDUA tidak mampu melaksanakan tugas dan tanggung jawab yang
+        dibebankan sesuai job description/putus demi hukum/karena berakhirnya
+        perjanjian dalam hal ini PIHAK PERTAMA tidak wajib membayar apapun atau sisa masa kontrak.</li>
+        <li>PIHAK KEDUA apabila ingin mengundurkan diri pada masa kontrak yang masih
+        berjalan maka harus membuat surat pengunduran diri dan diberikan kepada
+        PIHAK PERTAMA selambat-lambatnya N-1 (30 Hari sebelum pengunduran diri).</li>
+        <li>Perbuatan atau tindakan PIHAK KEDUA yang merupakan kesalahan berat,
+        melanggar Undang-Undang Ketenagakerjaan/Peraturan Ketenagakerjaan yang
+        berlaku, ketentuan Peraturan PIHAK PERTAMA serta perintah atasan baik lisan
+        maupun tulisan.</li>
+      </ol>
+      <p><b>Yang termasuk tindakan kesalahan berat itu adalah sebagai berikut:</b></p>
+      <ol type="a">
+        <li>Mencuri, menggelapkan, menipu atau melakukan kejahatan lainnya, baik yang menyangkut kepentingan Perusahaan maupun pihak lain.</li>
+        <li>Memberikan keterangan palsu atau dipalsukan kepada Perusahaan yang dijadikan dasar oleh Perusahaan dalam membuat Perjanjian Kerja ini.</li>
+        <li>Memberikan keterangan palsu atau dipalsukan kepada sehingga merugikan Perusahaan atau kepentingan negara.</li>
+        <li>Mabuk, minum minuman keras yang memabukkan, madat, memakai obat bius atau menyalahgunakan obat-obat terlarang ataupun obat perangsang lainnya yang dilarang oleh peraturan perundang-undangan, ditempat kerja, dan ditempat-tempat yang ditetapkan Pihak PERTAMA.</li>
+        <li>Melakukan perbuatan asusila atau melakukan perjudian ditempat kerja.</li>
+        <li>Menyerang, mengintimidasi atau menipu pengusaha atau teman sekerja dan memperdagangkan barang terlarang baik dalam lingkungan kerja maupun di luar lingkungan kerja.</li>
+        <li>Menganiaya, mengancam secara fisik dan mental, menghina secara kasar pimpinan atau pegawai perusahaan.</li>
+        <li>Membujuk pimpinan, teman sekerja atau pegawai perusahaan untuk melakukan sesuatu yang bertentangan dengan hukum atau kesusilaan serta perundangan yang berlaku.</li>
+        <li>Membongkar atau membocorkan rahasia perusahaan atau mencemarkan nama baik perusahaan yang seharusnya dirahasiakan kecuali untuk kepentingan negara atau dengan sengaja atau kecerobohannya merusak atau membiarkan barang-barang atau dokumen-dokumen milik atau yang berada dalam pengusaan perusahaan sehingga terancam bahaya.</li>
+        <li>Dengan sengaja walaupun sudah diperingatkan membiarkan dirinya atau teman sekerjanya dalam keadaan bahaya.</li>
+        <li>Hal-hal lain yang diatur dalam peraturan perusahaan.</li>
+        <li>Apabila PIHAK KEDUA sebelum bergabung di perusahaan PIHAK PERTAMA memiliki sangkutan, sengketa, penipuan, dan atau hal-hal yang bertentangan dengan Undang-undang (Miras, kekerasan, dan atau lainnya.), Maka akan diserahkan kepada pihak yang berwajib dan PIHAK PERTAMA berhak memutus hubungan kerja tanpa ada kompensasi apapun.</li>
+      </ol>
+      <p>Dalam hal tersebut di atas PIHAK PERTAMA tidak berkewajiban untuk membayar
+      uang kompensasi atau pembayaran lainnya kecuali gaji sampai pada saat pemutusan hubungan kerja.</p>
 
       <h2>PASAL 10 — Penyelesaian Perselisihan</h2>
-      <p>Bila terjadi perselisihan, kedua belah pihak berusaha menyelesaikan
-      melalui musyawarah dan bila tidak tercapai kesepakatan maka diselesaikan
-      sesuai ketentuan peraturan perundangan yang berlaku.</p>
+      <p>Bila terjadi perselisihan dalam pelaksanaan isi perjanjian kerja ini maka
+      kedua belah pihak berusaha menyelesaikannya melalui musyawarah dan bila tidak
+      tercapai kesepakatan maka akan diselesaikan sesuai ketentuan peraturan perundangan
+      yang berlaku.</p>
 
-      <p>Perjanjian ini dibuat atas dasar persetujuan dan kesepakatan kedua
-      belah pihak tanpa paksaan dan ditandatangani dengan sukarela.</p>
+      <p>PIHAK KEDUA dengan ini menyatakan mengerti dan akan patuh pada seluruh isi
+      perjanjian dan menyatakan bahwa tidak ada janji-janji ataupun ketentuan-ketentuan
+      lain yang diatur selain yang tercantum pada perjanjian kerja ini.</p>
+
+      <p>Demikian Perjanjian Kerja Waktu Tertentu ini dibuat atas dasar persetujuan dan
+      kesepakatan kedua belah pihak dalam keadaan sehat walafiat, tanpa paksaan dan
+      ditanda tangani kedua belah pihak dengan sukarela, dibuat dalam rangkap 2 (dua)
+      bermaterai cukup yang satu sama lainnya mempunyai kekuatan hukum yang sama.</p>
 
       <div class="sign">
-        <div>PIHAK PERTAMA<br>${cgEsc(d.company)}<br><br>${cgEsc(d.representative)}</div>
-        <div>PIHAK KEDUA<br><br><br>${cgEsc(d.employee?.full_name || '')}</div>
+        <div>PIHAK PERTAMA<br>CV. Zayco Boga Alifa<br><br>${cgEsc(d.representative)}<br>${cgEsc(d.representativeTitle)}</div>
+        <div>PIHAK KEDUA<br><br><br>${cgEsc(d.employee?.full_name || '')}<br>${cgEsc(d.position)}</div>
       </div>
     </div>`;
 }
@@ -2092,31 +2186,56 @@ function cgPkwttHtml(d) {
 }
 
 function cgAmendmentHtml(d) {
+  const oldStart = d.previousStartDate ? cgDate(d.previousStartDate) : '[TANGGAL MULAI LAMA]';
+  const oldEnd = d.previousEndDate ? cgDate(d.previousEndDate) : '[TANGGAL BERAKHIR LAMA]';
+  const newStart = d.startDate ? cgDate(d.startDate) : '[TANGGAL MULAI BARU]';
+  const newEnd = d.endDate ? cgDate(d.endDate) : '[TANGGAL BERAKHIR BARU]';
+
   return `
     <div class="cg-doc">
-      <h1>AMANDemen PERJANJIAN KERJA WAKTU TERTENTU</h1>
-      <p class="center">No. ${cgEsc(d.number || '[NOMOR DOKUMEN]')}</p>
+      <h1>AMANDemen I</h1>
+      <h1 style="font-size:14pt;margin-top:-8px;">PERJANJIAN KERJA WAKTU TERETENTU</h1>
+      <p class="center">Nomor: ${cgEsc(d.number || '[NOMOR DOKUMEN]')}</p>
 
-      <p>Amandemen ini merupakan perubahan atas Perjanjian Kerja Waktu Tertentu
-      antara <b>${cgEsc(d.company)}</b> sebagai PIHAK PERTAMA dan
-      <b>${cgEsc(d.employee?.full_name || '')}</b> sebagai PIHAK KEDUA.</p>
+      <p>Yang bertanda tangan di bawah ini:</p>
 
-      <h2>PERUBAHAN</h2>
-      <table>
-        <tr><td>Karyawan</td><td>${cgEsc(d.employee?.full_name || '')}</td></tr>
-        <tr><td>Jabatan</td><td>${cgEsc(d.position)}</td></tr>
-        <tr><td>Departemen</td><td>${cgEsc(d.department)}</td></tr>
-        <tr><td>Periode Baru</td><td>${cgDate(d.startDate)} s/d ${cgDate(d.endDate)}</td></tr>
-        <tr><td>Lokasi Kerja</td><td>${cgEsc(d.location)}</td></tr>
-      </table>
+      <p><b>1. Pihak Perusahaan</b><br>
+      Nama Perusahaan : CV. Zayco Boga Alifa<br>
+      Alamat Perusahaan : ${cgEsc(d.companyAddress)}<br>
+      Dalam hal ini diwakili oleh<br>
+      Nama : ${cgEsc(d.representative)}<br>
+      Jabatan : ${cgEsc(d.representativeTitle)}<br>
+      Dalam hal ini bertindak untuk dan atas nama CV Zayco Boga Alifa,
+      Selanjutnya disebut sebagai “Pihak Pertama”.</p>
 
-      <p>Ketentuan lain dalam perjanjian sebelumnya yang tidak diubah melalui
-      amandemen ini tetap berlaku sesuai dokumen sumber yang disepakati para
-      pihak.</p>
+      <p><b>2. Nama Pekerja : ${cgEsc(d.employee?.full_name || '')}</b><br>
+      NIK : ${cgEsc(d.employee?.employee_number || '-')}<br>
+      Tempat, &amp; Tanggal lahir : ${cgEsc(d.birthInfo || '-')}<br>
+      Jenis Kelamin : ${cgEsc(d.gender || '-')}<br>
+      Alamat : ${cgEsc(d.employee?.address || '-')}<br>
+      Dalam Hal ini disebut “Pihak Kedua”.</p>
+
+      <p>Bersepakat untuk mengadakan Amandemen I terhadap Kesepakatan Kerja
+      Waktu Tertentu No. ${cgEsc(d.previousContractNumber || d.number || '[NOMOR KONTRAK SEBELUMNYA]')}
+      dengan rincian sebagai berikut:</p>
+
+      <h2>Pasal I</h2>
+      <h2 style="font-size:11pt;">Jangka Waktu Kesepakatan Kerja</h2>
+
+      <p><b>Semula berbunyi:</b></p>
+      <p>Perjanjian Kerja Waktu Tertentu ini berlaku terhitung mulai tanggal
+      <b>${oldStart}</b> sampai dengan tanggal <b>${oldEnd}</b>.</p>
+
+      <p><b>Diubah Menjadi:</b></p>
+      <p>Perjanjian Kerja Waktu Tertentu ini berlaku terhitung mulai tanggal
+      <b>${newStart}</b> sampai dengan tanggal <b>${newEnd}</b>.</p>
+
+      <p>Demikian Amandemen I ini dibuat dan ditandatangani berdasarkan
+      kesepakatan kedua belah pihak.</p>
 
       <div class="sign">
-        <div>PIHAK PERTAMA<br>${cgEsc(d.company)}<br><br>${cgEsc(d.representative)}</div>
-        <div>PIHAK KEDUA<br><br><br>${cgEsc(d.employee?.full_name || '')}</div>
+        <div>Pihak Pertama<br><br><br>${cgEsc(d.representative)}<br>${cgEsc(d.representativeTitle)}</div>
+        <div>Pihak Kedua<br><br><br>${cgEsc(d.employee?.full_name || '')}<br>Karyawan</div>
       </div>
     </div>`;
 }
@@ -2174,10 +2293,17 @@ function cgOpenGenerator() {
       </div>
 
       ${cgField('cg_number', 'No. Dokumen / Kontrak')}
+      ${cgField('cg_previous_contract_number', 'No. Kontrak Sebelumnya')}
+      ${cgDateField('cg_previous_start_date', 'Periode Sebelumnya — Mulai')}
+      ${cgDateField('cg_previous_end_date', 'Periode Sebelumnya — Berakhir')}
       ${cgDateField('cg_join_date', 'Tanggal Bergabung')}
       ${cgDateField('cg_start_date', 'Tanggal Mulai', '', true)}
       ${cgDateField('cg_end_date', 'Tanggal Berakhir')}
       ${cgDateField('cg_signed_date', 'Tanggal Tanda Tangan')}
+
+      ${cgField('cg_status_text', 'Status Karyawan', 'Probation - 3 Bulan')}
+      ${cgField('cg_birth_info', 'Tempat & Tanggal Lahir')}
+      ${cgField('cg_gender', 'Jenis Kelamin')}
 
       ${cgField('cg_department', 'Departemen')}
       ${cgField('cg_position', 'Jabatan')}
@@ -2280,54 +2406,30 @@ async function cgExportWord() {
 
     const converter = await cgLoadDocxConverter();
 
-    // Use a complete HTML document so Word preserves headings, paragraphs,
-    // lists, tables, spacing and A4 page settings instead of flattening text.
-    const html = `<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <meta name="ProgId" content="Word.Document">
-  ${cgPrintCss()}
-  <style>
-    @page { size: A4; margin: 22mm 20mm 20mm 25mm; }
-    body { font-family: "Times New Roman", serif; font-size: 11pt; line-height: 1.35; }
-    .cg-doc { width: 165mm; margin: 0 auto; }
-    h1 { font-family: "Times New Roman", serif; font-size: 15pt; text-align:center; margin:0 0 12pt; }
-    h2 { font-family: "Times New Roman", serif; font-size: 12pt; margin:12pt 0 6pt; }
-    p { margin:0 0 7pt; text-align:justify; }
-    ol, ul { margin-top:4pt; margin-bottom:7pt; }
-    li { margin-bottom:3pt; }
-    table { width:100%; border-collapse:collapse; }
-    td, th { border:1px solid #777; padding:5pt 7pt; vertical-align:top; }
-    .sign { display:table; width:100%; margin-top:40pt; }
-    .sign > div { display:table-cell; width:50%; text-align:center; vertical-align:top; }
-    .sign > div + div { padding-left:25pt; }
-  </style>
-</head>
-<body>${cgBuildHtml(d)}</body>
-</html>`;
+    const html = `
+      <!doctype html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        ${cgPrintCss()}
+      </head>
+      <body>${cgBuildHtml(d)}</body>
+      </html>`;
 
-    const blob = converter.asBlob(html, {
-      orientation: 'portrait',
-      margins: {
-        top: 1260,
-        right: 1134,
-        bottom: 1134,
-        left: 1418,
-        header: 0,
-        footer: 0,
-        gutter: 0
-      }
-    });
+    const blob = await converter.toDocx(html);
 
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
+
     a.href = url;
-    a.download = `${d.type}_${(d.employee?.full_name || 'karyawan').replace(/[^a-z0-9]+/gi,'_')}.docx`;
+    a.download =
+      `${d.type}_${(d.employee?.full_name || 'karyawan').replace(/[^a-z0-9]+/gi,'_')}.docx`;
+
     document.body.appendChild(a);
     a.click();
     a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1500);
+
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
 
     toast('File Word berhasil dibuat.');
   } catch (err) {
