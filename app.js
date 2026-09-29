@@ -3688,3 +3688,177 @@ console.log('PHASE 6C FIX loaded — Approval Tim menggunakan sb/state langsung'
 
   console.log('PHASE 6C FIX 2 loaded — tombol Setujui SPV diarahkan ke ep6cApprove');
 })();
+/* PHASE 6C FINAL FIX — TOMBOL SETUJUI SPV */
+(function () {
+  'use strict';
+
+  async function finalSupervisorApprove(requestId, decision) {
+    try {
+      const profile = state.profile;
+      const myEmployeeId = profile && profile.employee_id;
+
+      if (!myEmployeeId) {
+        toast('Akun SPV belum terhubung ke data karyawan.', 'error');
+        return;
+      }
+
+      const rq = await sb.from('leave_requests')
+        .select('id,employee_id,status,supervisor_status,hr_status,start_date,end_date,reason')
+        .eq('id', requestId)
+        .maybeSingle();
+
+      if (rq.error) { toast(friendlyError(rq.error), 'error'); return; }
+      const request = rq.data;
+
+      if (!request) {
+        toast('Pengajuan tidak ditemukan.', 'error');
+        return;
+      }
+
+      if (request.status !== 'pending') {
+        toast('Pengajuan ini sudah diproses dan tidak lagi menunggu SPV.', 'error');
+        return;
+      }
+
+      const er = await sb.from('employees')
+        .select('id,full_name,employee_number,supervisor_employee_id')
+        .eq('id', request.employee_id)
+        .maybeSingle();
+
+      if (er.error) { toast(friendlyError(er.error), 'error'); return; }
+      const employee = er.data;
+
+      if (!employee) {
+        toast('Data karyawan pengajuan tidak ditemukan.', 'error');
+        return;
+      }
+
+      if (employee.supervisor_employee_id !== myEmployeeId) {
+        toast('Anda bukan atasan langsung karyawan ini.', 'error');
+        return;
+      }
+
+      const isApprove = decision === 'approved';
+
+      if (!confirm(isApprove
+        ? `Setujui pengajuan ${employee.full_name}?`
+        : `Tolak pengajuan ${employee.full_name}?`)) return;
+
+      const note = isApprove ? null : ((prompt('Alasan penolakan (opsional):') || '').trim() || null);
+      const now = new Date().toISOString();
+
+      const payload = isApprove
+        ? {
+            supervisor_status: 'approved',
+            supervisor_approved_at: now,
+            supervisor_approved_by: profile.id,
+            status: 'supervisor_approved',
+            supervisor_note: null
+          }
+        : {
+            supervisor_status: 'rejected',
+            supervisor_approved_at: now,
+            supervisor_approved_by: profile.id,
+            status: 'rejected',
+            supervisor_note: note
+          };
+
+      const ur = await sb.from('leave_requests')
+        .update(payload)
+        .eq('id', requestId)
+        .eq('status', 'pending')
+        .select('id,status,supervisor_status,hr_status')
+        .maybeSingle();
+
+      if (ur.error) {
+        toast(friendlyError(ur.error), 'error');
+        return;
+      }
+
+      if (!ur.data) {
+        toast('Pengajuan tidak berubah. Periksa policy RLS leave_requests.', 'error');
+        return;
+      }
+
+      const ar = await sb.from('leave_approvals').insert({
+        leave_request_id: requestId,
+        approver_profile_id: profile.id,
+        approval_level: 'supervisor',
+        decision: decision,
+        note: note,
+        decided_at: now
+      });
+
+      if (ar.error) {
+        console.error('leave_approvals:', ar.error);
+        toast('Status sudah berubah, tetapi riwayat approval gagal disimpan: ' + friendlyError(ar.error), 'error');
+      } else {
+        toast(isApprove
+          ? 'Berhasil disetujui SPV. Pengajuan diteruskan ke HR.'
+          : 'Pengajuan berhasil ditolak.');
+      }
+
+      if (typeof loadAll === 'function') await loadAll();
+      if (typeof ep6cRenderApproval === 'function') {
+        await ep6cRenderApproval();
+      } else if (typeof leave === 'function') {
+        leave();
+      }
+
+    } catch (err) {
+      console.error('FINAL Approval SPV error:', err);
+      toast(friendlyError(err), 'error');
+    }
+  }
+
+  window.finalSupervisorApprove = finalSupervisorApprove;
+
+  /* Tangkap tombol lama: p6Approve('ID','supervisor','approved') */
+  document.addEventListener('click', function (event) {
+    const btn = event.target.closest('button');
+    if (!btn) return;
+
+    const text = (btn.textContent || '').trim().toLowerCase();
+    if (!text.includes('setujui') || text.includes('approve hr')) return;
+
+    const onclick = btn.getAttribute('onclick') || '';
+    const m = onclick.match(
+      /p6Approve\s*\(\s*['"]([^'"]+)['"]\s*,\s*['"]supervisor['"]\s*,\s*['"](approved|rejected)['"]\s*\)/
+    );
+
+    if (!m) return;
+
+    event.preventDefault();
+    event.stopImmediatePropagation();
+
+    btn.disabled = false;
+    btn.removeAttribute('disabled');
+    btn.style.pointerEvents = 'auto';
+
+    finalSupervisorApprove(m[1], m[2]);
+  }, true);
+
+  /* Lapisan kedua: override handler lama. */
+  window.p6Approve = async function (id, level, decision) {
+    if (level === 'supervisor') return finalSupervisorApprove(id, decision);
+    toast('Approval HR menggunakan alur HR.', 'error');
+  };
+
+  function unlockApprovalButtons() {
+    document.querySelectorAll('button').forEach(btn => {
+      const t = (btn.textContent || '').trim().toLowerCase();
+      if (t.includes('setujui') && !t.includes('approve hr')) {
+        btn.disabled = false;
+        btn.removeAttribute('disabled');
+        btn.style.pointerEvents = 'auto';
+        btn.style.cursor = 'pointer';
+      }
+    });
+  }
+
+  unlockApprovalButtons();
+  new MutationObserver(unlockApprovalButtons)
+    .observe(document.body, {childList: true, subtree: true});
+
+  console.log('PHASE 6C FINAL FIX loaded');
+})();
