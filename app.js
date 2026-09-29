@@ -4212,3 +4212,222 @@ console.log('PHASE 6C FIX loaded — Approval Tim menggunakan sb/state langsung'
     'PHASE 6C FIX 4 loaded — Approval Tim menggunakan query database langsung'
   );
 })();
+/* ================================================================
+   PHASE 6C — FIX 5: AMBIL EMPLOYEE ID LOGIN LANGSUNG DARI PROFILES
+   Masalah FIX 4:
+   state.profile.employee_id kosong walaupun akun Sunarwan sudah benar.
+   Fix ini tidak bergantung pada state.profile.employee_id.
+   ================================================================ */
+(function () {
+  'use strict';
+
+  async function getMyEmployeeId() {
+    /* Ambil user login dari Supabase Auth. */
+    const auth = await sb.auth.getUser();
+    if (auth.error) throw auth.error;
+
+    const user = auth.data && auth.data.user;
+    if (!user) throw new Error('Sesi login tidak ditemukan. Silakan login ulang.');
+
+    /* Ambil employee_id langsung dari public.profiles. */
+    const p = await sb
+      .from('profiles')
+      .select('id,employee_id,full_name,role,is_active')
+      .eq('id', user.id)
+      .maybeSingle();
+
+    if (p.error) throw p.error;
+
+    if (!p.data) {
+      throw new Error('Profil login tidak ditemukan di public.profiles.');
+    }
+
+    if (!p.data.employee_id) {
+      throw new Error(
+        'Akun ' + (p.data.full_name || user.email || 'ini') +
+        ' belum memiliki employee_id di public.profiles.'
+      );
+    }
+
+    return {
+      userId: user.id,
+      employeeId: p.data.employee_id,
+      profile: p.data
+    };
+  }
+
+  async function approveFromButton(btn) {
+    const originalText = btn.textContent;
+
+    try {
+      btn.disabled = true;
+      btn.textContent = 'Memproses...';
+
+      const row = btn.closest('tr');
+      if (!row) throw new Error('Baris pengajuan tidak ditemukan.');
+
+      const firstCell = row.querySelector('td');
+      const employeeNumber = firstCell
+        ? ((firstCell.innerText || '').match(/\b\d{8,}\b/) || [null])[0]
+        : null;
+
+      if (!employeeNumber) {
+        throw new Error('ID karyawan pada baris tidak ditemukan.');
+      }
+
+      /* Ambil ID employee milik akun Sunarwan dari PROFILES. */
+      const me = await getMyEmployeeId();
+
+      /* Ambil Abdul Rozak langsung dari DATABASE. */
+      const employeeQuery = await sb
+        .from('employees')
+        .select('id,full_name,employee_number,supervisor_employee_id')
+        .eq('employee_number', employeeNumber)
+        .maybeSingle();
+
+      if (employeeQuery.error) throw employeeQuery.error;
+
+      const emp = employeeQuery.data;
+
+      if (!emp) {
+        throw new Error('Data karyawan tidak ditemukan: ' + employeeNumber);
+      }
+
+      /* Pastikan Abdul adalah bawahan langsung Sunarwan. */
+      if (String(emp.supervisor_employee_id) !== String(me.employeeId)) {
+        throw new Error(
+          'Karyawan ' + (emp.full_name || employeeNumber) +
+          ' bukan bawahan langsung akun yang sedang login.'
+        );
+      }
+
+      /* Ambil pengajuan pending langsung dari DATABASE. */
+      const requestQuery = await sb
+        .from('leave_requests')
+        .select('id,employee_id,status,supervisor_status,hr_status')
+        .eq('employee_id', emp.id)
+        .eq('status', 'pending')
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      if (requestQuery.error) throw requestQuery.error;
+
+      const request = requestQuery.data && requestQuery.data[0];
+
+      if (!request) {
+        throw new Error(
+          'Pengajuan pending ' + (emp.full_name || employeeNumber) +
+          ' tidak ditemukan.'
+        );
+      }
+
+      if (!confirm('Setujui pengajuan ' + (emp.full_name || '') + '?')) {
+        btn.disabled = false;
+        btn.textContent = originalText;
+        return;
+      }
+
+      const now = new Date().toISOString();
+
+      /* Approval SPV. */
+      const updateQuery = await sb
+        .from('leave_requests')
+        .update({
+          supervisor_status: 'approved',
+          supervisor_approved_at: now,
+          supervisor_approved_by: me.userId,
+          status: 'supervisor_approved',
+          supervisor_note: null
+        })
+        .eq('id', request.id)
+        .eq('status', 'pending')
+        .select('id,status,supervisor_status,hr_status');
+
+      if (updateQuery.error) throw updateQuery.error;
+
+      if (!updateQuery.data || !updateQuery.data.length) {
+        throw new Error(
+          'Database tidak mengubah pengajuan. Policy RLS leave_requests masih menolak approval SPV.'
+        );
+      }
+
+      /* Simpan histori approval. */
+      const historyQuery = await sb
+        .from('leave_approvals')
+        .insert({
+          leave_request_id: request.id,
+          approver_profile_id: me.userId,
+          approval_level: 'supervisor',
+          decision: 'approved',
+          note: null,
+          decided_at: now
+        });
+
+      if (historyQuery.error) {
+        console.error('Riwayat approval gagal:', historyQuery.error);
+        toast(
+          'Pengajuan sudah disetujui SPV, tetapi riwayat approval gagal disimpan.',
+          'error'
+        );
+      } else {
+        toast('Berhasil disetujui SPV. Pengajuan diteruskan ke HR.');
+      }
+
+      if (typeof loadAll === 'function') {
+        await loadAll();
+      }
+
+      if (typeof ep6cRenderApproval === 'function') {
+        await ep6cRenderApproval();
+      } else {
+        window.location.reload();
+      }
+
+    } catch (err) {
+      console.error('FIX 5 Approval Tim:', err);
+      toast(
+        typeof friendlyError === 'function'
+          ? friendlyError(err)
+          : String(err.message || err),
+        'error'
+      );
+      btn.disabled = false;
+      btn.textContent = originalText;
+    }
+  }
+
+  function bindApprovalButtons() {
+    document.querySelectorAll('button').forEach(btn => {
+      const text = (btn.textContent || '').trim().toLowerCase();
+
+      if (text !== 'setujui' && text !== 'setujui spv') return;
+      if (btn.dataset.fix5ApprovalBound === '1') return;
+
+      btn.removeAttribute('onclick');
+      btn.disabled = false;
+      btn.dataset.fix5ApprovalBound = '1';
+
+      btn.style.position = 'relative';
+      btn.style.zIndex = '99999';
+      btn.style.pointerEvents = 'auto';
+      btn.style.cursor = 'pointer';
+
+      btn.addEventListener('click', function (e) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        approveFromButton(btn);
+      }, true);
+    });
+  }
+
+  bindApprovalButtons();
+
+  const observer = new MutationObserver(bindApprovalButtons);
+  observer.observe(document.body, { childList: true, subtree: true });
+
+  setInterval(bindApprovalButtons, 500);
+
+  console.log(
+    'PHASE 6C FIX 5 loaded — employee_id login diambil langsung dari profiles'
+  );
+})();
