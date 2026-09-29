@@ -3640,3 +3640,51 @@ window.ep6cApprove = async function(requestId, decision) {
 };
 
 console.log('PHASE 6C FIX loaded — Approval Tim menggunakan sb/state langsung');
+/* ============================================================
+   PHASE 6C FIX 2 — HUBUNGKAN TOMBOL "SETUJUI SPV" KE HANDLER BARU
+   Masalah: tombol lama masih memanggil p6Approve(...), sedangkan
+   patch sebelumnya membuat ep6cApprove(...). Akibatnya tombol
+   "Setujui" tetap tidak menjalankan handler yang baru.
+
+   CARA PAKAI:
+   1. Tempel file ini di PALING BAWAH app.js
+   2. Commit & push ke GitHub
+   3. Tunggu Vercel deploy
+   4. Logout/login kembali sebagai Sunarwan
+   ============================================================ */
+
+(function () {
+  'use strict';
+
+  /* Jangan menyimpan wrapper berulang kali jika file ter-load lebih dari sekali. */
+  if (!window.__phase6cOriginalP6Approve) {
+    window.__phase6cOriginalP6Approve = window.p6Approve;
+  }
+
+  /*
+   * Tombol lama di halaman Approval Tim menggunakan:
+   * p6Approve(id, 'supervisor', 'approved')
+   *
+   * Kita arahkan khusus level supervisor ke ep6cApprove().
+   * Approval HR tetap memakai handler lama.
+   */
+  window.p6Approve = async function (id, level, decision) {
+    if (level === 'supervisor') {
+      if (typeof window.ep6cApprove !== 'function') {
+        toast('Handler Approval Tim belum termuat. Pastikan patch PHASE 6C FIX sebelumnya juga sudah ditempel.', 'error');
+        return;
+      }
+
+      return await window.ep6cApprove(id, decision);
+    }
+
+    const original = window.__phase6cOriginalP6Approve;
+    if (typeof original === 'function') {
+      return await original(id, level, decision);
+    }
+
+    toast('Handler approval HR belum tersedia.', 'error');
+  };
+
+  console.log('PHASE 6C FIX 2 loaded — tombol Setujui SPV diarahkan ke ep6cApprove');
+})();
