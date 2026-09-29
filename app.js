@@ -4431,3 +4431,198 @@ console.log('PHASE 6C FIX loaded — Approval Tim menggunakan sb/state langsung'
     'PHASE 6C FIX 5 loaded — employee_id login diambil langsung dari profiles'
   );
 })();
+/* PHASE 6C — Approval Tim
+   Tempelkan di PALING BAWAH app.js */
+
+(function () {
+  function me() {
+    return state?.profile?.employee_id
+      ? (state.employees || []).find(e => e.id === state.profile.employee_id)
+      : null;
+  }
+
+  function team() {
+    const m = me();
+    return m ? (state.employees || []).filter(e =>
+      e.employment_status !== 'inactive' &&
+      e.supervisor_employee_id === m.id
+    ) : [];
+  }
+
+  async function loadApproval() {
+    const m = me(), t = team();
+    if (!m || !t.length) return { team:t, requests:[] };
+
+    const {data,error} = await sb.from('leave_requests')
+      .select(`*, leave_types(name), employees!leave_requests_employee_id_fkey(
+        id,employee_number,full_name,supervisor_employee_id)`)
+      .in('employee_id', t.map(x=>x.id))
+      .eq('status','pending')
+      .order('created_at',{ascending:false});
+
+    if (error) throw error;
+    return {team:t,requests:data||[]};
+  }
+
+  async function renderApproval() {
+    const root = document.querySelector('main') ||
+                 document.querySelector('.content') ||
+                 document.querySelector('.main-content') ||
+                 document.body;
+
+    root.innerHTML = `
+      <div class="page-head">
+        <div><h1>Approval Tim</h1>
+        <div class="muted">Pengajuan cuti/izin anggota tim Anda.</div></div>
+      </div>
+      <div id="approvalTimBody"><div class="card empty">Memuat...</div></div>`;
+
+    const body=document.getElementById('approvalTimBody');
+
+    try {
+      const {team,requests}=await loadApproval();
+
+      if(!team.length){
+        body.innerHTML=`<div class="card empty">
+          Belum ada karyawan yang terhubung sebagai anggota tim Anda.
+        </div>`;
+        return;
+      }
+
+      if(!requests.length){
+        body.innerHTML=`<div class="card empty">
+          Tidak ada pengajuan yang sedang menunggu persetujuan Anda.
+        </div>`;
+        return;
+      }
+
+      body.innerHTML=`<div class="card"><div style="overflow:auto">
+        <table class="table"><thead><tr>
+          <th>Karyawan</th><th>Jenis</th><th>Periode</th><th>Hari</th><th>Aksi</th>
+        </tr></thead><tbody>
+        ${requests.map(r=>{
+          const e=r.employees||{};
+          const lt=r.leave_types||{};
+          return `<tr>
+            <td><b>${esc(e.full_name||'-')}</b>
+              <div class="muted">${esc(e.employee_number||'')}</div></td>
+            <td>${esc(lt.name||'-')}</td>
+            <td>${fmtDate(r.start_date)} — ${fmtDate(r.end_date)}</td>
+            <td>${r.total_days||p6Days(r.start_date,r.end_date)}</td>
+            <td><div class="row-actions">
+              <button class="btn btn-primary btn-sm"
+                onclick="p6cDecision('${esc(r.id)}','approved')">Setujui</button>
+              <button class="btn btn-light btn-sm"
+                onclick="p6cDecision('${esc(r.id)}','rejected')">Tolak</button>
+            </div></td>
+          </tr>`;
+        }).join('')}
+        </tbody></table></div></div>`;
+    } catch(e) {
+      console.error(e);
+      body.innerHTML=`<div class="card">
+        <b>Gagal memuat Approval Tim</b>
+        <div class="muted">${esc(friendlyError(e))}</div>
+      </div>`;
+    }
+  }
+
+  window.p6cDecision = async function(id,decision) {
+    try {
+      const m=me();
+      if(!m){toast('Akun belum terhubung ke data karyawan.','error');return;}
+
+      const {data:r,error}=await sb.from('leave_requests')
+        .select(`*, employees!leave_requests_employee_id_fkey(
+          id,employee_number,full_name,supervisor_employee_id)`)
+        .eq('id',id).single();
+
+      if(error){toast(friendlyError(error),'error');return;}
+
+      const e=r.employees;
+      if(!e || e.supervisor_employee_id!==m.id){
+        toast('Anda bukan atasan langsung karyawan ini.','error');return;
+      }
+
+      if(r.status!=='pending'){
+        toast('Pengajuan ini sudah diproses.','error');
+        renderApproval(); return;
+      }
+
+      if(!confirm(
+        `Anda yakin ingin ${decision==='approved'?'menyetujui':'menolak'} pengajuan ${e.full_name}?`
+      )) return;
+
+      const note=decision==='rejected'
+        ? ((prompt('Alasan penolakan (opsional):')||'').trim()||null)
+        : null;
+
+      const now=new Date().toISOString();
+      const payload=decision==='approved'
+        ? {supervisor_status:'approved',status:'supervisor_approved',
+           supervisor_approved_at:now,supervisor_approved_by:state.profile.id,
+           supervisor_note:note}
+        : {supervisor_status:'rejected',status:'rejected',
+           supervisor_approved_at:now,supervisor_approved_by:state.profile.id,
+           supervisor_note:note};
+
+      const {data:updated,error:ue}=await sb.from('leave_requests')
+        .update(payload).eq('id',id).eq('status','pending')
+        .select('id,status,supervisor_status,hr_status');
+
+      if(ue){toast(friendlyError(ue),'error');return;}
+      if(!updated?.length){
+        toast('Pengajuan tidak berubah. Periksa policy RLS.','error');return;
+      }
+
+      const {error:he}=await sb.from('leave_approvals').insert({
+        leave_request_id:id,
+        approval_level:'supervisor',
+        approver_profile_id:state.profile.id,
+        decision,
+        note,
+        decided_at:now
+      });
+
+      if(he){
+        toast('Status berubah, tetapi riwayat approval gagal disimpan: '+friendlyError(he),'error');
+      } else {
+        toast(decision==='approved'
+          ? 'Pengajuan disetujui SPV dan diteruskan ke HR.'
+          : 'Pengajuan berhasil ditolak.');
+      }
+
+      await loadAll();
+      renderApproval();
+    } catch(e) {
+      console.error(e);
+      toast(friendlyError(e),'error');
+    }
+  };
+
+  function addMenu() {
+    if(!me() || !team().length) return;
+    if([...document.querySelectorAll('a,button')].some(x=>
+      (x.textContent||'').trim()==='Approval Tim')) return;
+
+    const nav=document.querySelector('.sidebar .nav')||
+              document.querySelector('.sidebar')||
+              document.querySelector('aside');
+    if(!nav) return;
+
+    const a=document.createElement('a');
+    a.href='#';
+    a.className='nav-item';
+    a.textContent='Approval Tim';
+    a.onclick=e=>{e.preventDefault();renderApproval();};
+    nav.appendChild(a);
+  }
+
+  const ob=new MutationObserver(addMenu);
+  ob.observe(document.body,{childList:true,subtree:true});
+  setTimeout(addMenu,500);
+  setTimeout(addMenu,1500);
+  setTimeout(addMenu,3000);
+  window.p6cRenderApproval=renderApproval;
+  console.log('Phase 6C Approval Tim loaded');
+})();
