@@ -4776,3 +4776,195 @@ window.phase6cApproveHR = async function(requestId, decision) {
 
   console.log('Phase 6C Fix Approval HR aktif.');
 })();
+/* ============================================================
+   PHASE 6C — FINAL FIX APPROVE HR (DIRECT CLICK INTERCEPTOR)
+   Bypass handler lama yang masih menampilkan:
+   "Approval HR menggunakan alur HR."
+   Tempelkan di PALING BAWAH app.js
+   ============================================================ */
+
+window.phase6cFinalApproveHR = async function(requestId, decision) {
+  try {
+    const profile = state.profile;
+    if (!profile) {
+      toast('Profil pengguna tidak ditemukan.', 'error');
+      return;
+    }
+
+    const role = String(profile.role || '').toLowerCase();
+    const isHR = ['admin', 'super_admin', 'hr', 'hr_admin'].includes(role);
+
+    if (!isHR) {
+      toast('Akun ini bukan akun HR.', 'error');
+      return;
+    }
+
+    const { data: request, error } = await sb
+      .from('leave_requests')
+      .select('id,status,supervisor_status,hr_status')
+      .eq('id', requestId)
+      .maybeSingle();
+
+    if (error) {
+      toast(friendlyError(error), 'error');
+      return;
+    }
+
+    if (!request) {
+      toast('Pengajuan tidak ditemukan.', 'error');
+      return;
+    }
+
+    if (request.supervisor_status !== 'approved' ||
+        request.status !== 'supervisor_approved') {
+      toast('Pengajuan belum disetujui SPV.', 'error');
+      return;
+    }
+
+    if (request.hr_status === 'approved' || request.status === 'approved') {
+      toast('Pengajuan ini sudah disetujui HR.', 'error');
+      return;
+    }
+
+    const isApprove = decision === 'approved';
+
+    if (!confirm(
+      isApprove
+        ? 'Anda yakin ingin menyetujui pengajuan ini sebagai HR?'
+        : 'Anda yakin ingin menolak pengajuan ini sebagai HR?'
+    )) return;
+
+    let note = null;
+
+    if (!isApprove) {
+      note = (prompt('Catatan penolakan HR (opsional):') || '').trim() || null;
+    }
+
+    const now = new Date().toISOString();
+
+    const payload = isApprove
+      ? {
+          hr_status: 'approved',
+          hr_approved_at: now,
+          hr_approved_by: profile.id,
+          status: 'approved',
+          hr_note: note
+        }
+      : {
+          hr_status: 'rejected',
+          hr_approved_at: now,
+          hr_approved_by: profile.id,
+          status: 'rejected',
+          hr_note: note
+        };
+
+    const { data: updated, error: updateError } = await sb
+      .from('leave_requests')
+      .update(payload)
+      .eq('id', requestId)
+      .eq('status', 'supervisor_approved')
+      .select('id,status,supervisor_status,hr_status')
+      .maybeSingle();
+
+    if (updateError) {
+      toast(friendlyError(updateError), 'error');
+      return;
+    }
+
+    if (!updated) {
+      toast('Pengajuan tidak berubah. Status harus Disetujui SPV.', 'error');
+      return;
+    }
+
+    const { error: historyError } = await sb
+      .from('leave_approvals')
+      .insert({
+        leave_request_id: requestId,
+        approval_level: 'hr',
+        approver_profile_id: profile.id,
+        decision: decision,
+        note: note,
+        decided_at: now
+      });
+
+    if (historyError) {
+      console.error('HR approval history:', historyError);
+      toast(
+        'Status berhasil berubah, tetapi riwayat approval HR gagal disimpan: ' +
+        friendlyError(historyError),
+        'error'
+      );
+    } else {
+      toast(
+        isApprove
+          ? 'Pengajuan berhasil disetujui HR.'
+          : 'Pengajuan berhasil ditolak HR.'
+      );
+    }
+
+    if (typeof p6RefreshLeaveData === 'function') {
+      await p6RefreshLeaveData();
+    } else if (typeof loadAll === 'function') {
+      await loadAll();
+    }
+
+    if (typeof leave === 'function') {
+      leave();
+    }
+
+  } catch (err) {
+    console.error('Final Approve HR error:', err);
+    toast(friendlyError(err), 'error');
+  }
+};
+
+
+/* ============================================================
+   INTERCEPTOR
+   Menangkap klik tombol "Approve HR" SEBELUM onclick lama.
+   Jadi handler lama tidak lagi dijalankan.
+   ============================================================ */
+
+(function installFinalApproveHRInterceptor() {
+  if (window.__phase6cFinalHRInstalled) return;
+  window.__phase6cFinalHRInstalled = true;
+
+  document.addEventListener('click', function(event) {
+    const button = event.target.closest('button');
+
+    if (!button) return;
+
+    const text = String(button.textContent || '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase();
+
+    if (text !== 'approve hr') return;
+
+    const onclick = button.getAttribute('onclick') || '';
+
+    /* Ambil UUID request dari:
+       p6Approve('UUID','hr','approved')
+    */
+    const match = onclick.match(
+      /p6Approve\(\s*['"]([^'"]+)['"]\s*,\s*['"]hr['"]\s*,\s*['"]([^'"]+)['"]\s*\)/
+    );
+
+    if (!match) {
+      toast('ID pengajuan HR tidak ditemukan pada tombol.', 'error');
+      return;
+    }
+
+    const requestId = match[1];
+    const decision = match[2];
+
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+
+    window.phase6cFinalApproveHR(requestId, decision);
+
+  }, true);
+
+  console.log('Phase 6C FINAL APPROVE HR interceptor aktif.');
+})();
