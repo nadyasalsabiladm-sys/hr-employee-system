@@ -3862,3 +3862,167 @@ console.log('PHASE 6C FIX loaded — Approval Tim menggunakan sb/state langsung'
 
   console.log('PHASE 6C FINAL FIX loaded');
 })();
+/* ================================================================
+   PHASE 6C — FIX 3: REBIND TOMBOL SETUJUI SECARA LANGSUNG
+   Tidak menggunakan onclick HTML lama.
+   ================================================================ */
+(function () {
+  'use strict';
+
+  async function approveFromButton(btn) {
+    try {
+      btn.disabled = true;
+      const oldText = btn.textContent;
+      btn.textContent = 'Memproses...';
+
+      const row = btn.closest('tr');
+      if (!row) throw new Error('Baris pengajuan tidak ditemukan.');
+
+      /* Ambil nomor karyawan dari baris tabel. */
+      const firstCell = row.querySelector('td');
+      const employeeNumber = firstCell
+        ? ((firstCell.innerText || '').match(/\b\d{8,}\b/) || [null])[0]
+        : null;
+
+      if (!employeeNumber) {
+        throw new Error('ID karyawan pada baris pengajuan tidak ditemukan.');
+      }
+
+      const emp = (state.employees || []).find(
+        e => String(e.employee_number || '') === String(employeeNumber)
+      );
+
+      if (!emp) throw new Error('Data karyawan tidak ditemukan: ' + employeeNumber);
+
+      const myEmployeeId = state.profile && state.profile.employee_id;
+      if (!myEmployeeId) {
+        throw new Error('Akun Sunarwan belum terhubung ke data karyawan.');
+      }
+
+      if (String(emp.supervisor_employee_id) !== String(myEmployeeId)) {
+        throw new Error('Karyawan ini bukan bawahan langsung akun yang sedang login.');
+      }
+
+      /* Cari pengajuan pending milik karyawan tersebut. */
+      let request = (state.leave || []).find(
+        r => String(r.employee_id) === String(emp.id) &&
+             r.status === 'pending'
+      );
+
+      /* Jika state belum memuat, ambil langsung dari Supabase. */
+      if (!request) {
+        const q = await sb.from('leave_requests')
+          .select('id,employee_id,status,supervisor_status,hr_status')
+          .eq('employee_id', emp.id)
+          .eq('status', 'pending')
+          .order('created_at', { ascending: false })
+          .limit(1);
+
+        if (q.error) throw q.error;
+        request = q.data && q.data[0];
+      }
+
+      if (!request) throw new Error('Pengajuan pending tidak ditemukan.');
+
+      if (!confirm('Setujui pengajuan ' + (emp.full_name || '') + '?')) {
+        btn.disabled = false;
+        btn.textContent = oldText;
+        return;
+      }
+
+      const now = new Date().toISOString();
+
+      const q = await sb.from('leave_requests')
+        .update({
+          supervisor_status: 'approved',
+          supervisor_approved_at: now,
+          supervisor_approved_by: state.profile.id,
+          status: 'supervisor_approved',
+          supervisor_note: null
+        })
+        .eq('id', request.id)
+        .eq('status', 'pending')
+        .select('id,status,supervisor_status,hr_status');
+
+      if (q.error) throw q.error;
+      if (!q.data || !q.data.length) {
+        throw new Error('Database tidak mengubah pengajuan. Cek RLS leave_requests.');
+      }
+
+      const history = await sb.from('leave_approvals').insert({
+        leave_request_id: request.id,
+        approver_profile_id: state.profile.id,
+        approval_level: 'supervisor',
+        decision: 'approved',
+        note: null,
+        decided_at: now
+      });
+
+      if (history.error) {
+        console.error('Riwayat approval:', history.error);
+        toast('Pengajuan sudah disetujui SPV, tetapi riwayat approval gagal disimpan.', 'error');
+      } else {
+        toast('Berhasil disetujui SPV. Pengajuan diteruskan ke HR.');
+      }
+
+      if (typeof loadAll === 'function') await loadAll();
+
+      /* Refresh halaman Approval Tim tanpa kembali ke menu lain. */
+      if (typeof ep6cRenderApproval === 'function') {
+        await ep6cRenderApproval();
+      } else {
+        /* Cari fungsi portal yang sedang digunakan dengan cara aman. */
+        const approvalBtn = Array.from(document.querySelectorAll('button,a'))
+          .find(x => (x.textContent || '').trim() === 'Approval Tim');
+        if (approvalBtn) approvalBtn.click();
+      }
+
+    } catch (err) {
+      console.error('FIX 3 Approval:', err);
+      toast(typeof friendlyError === 'function' ? friendlyError(err) : String(err.message || err), 'error');
+      btn.disabled = false;
+      btn.textContent = 'Setujui';
+    }
+  }
+
+  function bindApprovalButtons() {
+    const buttons = Array.from(document.querySelectorAll('button'))
+      .filter(btn => {
+        const text = (btn.textContent || '').trim().toLowerCase();
+        return text === 'setujui' || text === 'setujui spv';
+      });
+
+    buttons.forEach(btn => {
+      if (btn.dataset.finalApprovalBound === '1') return;
+
+      /* Lepaskan onclick lama yang bermasalah. */
+      btn.removeAttribute('onclick');
+
+      btn.dataset.finalApprovalBound = '1';
+      btn.disabled = false;
+
+      /* Paksa tombol berada di atas elemen lain. */
+      btn.style.position = 'relative';
+      btn.style.zIndex = '99999';
+      btn.style.pointerEvents = 'auto';
+      btn.style.cursor = 'pointer';
+
+      btn.addEventListener('click', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        approveFromButton(btn);
+      }, false);
+    });
+  }
+
+  bindApprovalButtons();
+
+  /* Approval Tim dirender ulang secara dinamis, jadi bind ulang otomatis. */
+  const observer = new MutationObserver(bindApprovalButtons);
+  observer.observe(document.body, { childList: true, subtree: true });
+
+  /* Fallback untuk render yang tidak memicu MutationObserver. */
+  setInterval(bindApprovalButtons, 500);
+
+  console.log('PHASE 6C FIX 3 loaded — tombol Setujui dibind langsung');
+})();
