@@ -4626,3 +4626,153 @@ console.log('PHASE 6C FIX loaded — Approval Tim menggunakan sb/state langsung'
   window.p6cRenderApproval=renderApproval;
   console.log('Phase 6C Approval Tim loaded');
 })();
+/* PHASE 6C — FIX APPROVAL HR
+   Tempelkan di PALING BAWAH app.js
+*/
+
+window.phase6cApproveHR = async function(requestId, decision) {
+  try {
+    const profile = state.profile;
+    if (!profile) {
+      toast('Profil pengguna tidak ditemukan.', 'error');
+      return;
+    }
+
+    const role = String(profile.role || '').toLowerCase();
+    const isHR = !Object.prototype.hasOwnProperty.call(profile, 'role')
+      || ['admin', 'super_admin', 'hr', 'hr_admin'].includes(role);
+
+    if (!isHR) {
+      toast('Akun ini bukan akun HR.', 'error');
+      return;
+    }
+
+    const { data: request, error: requestError } = await sb
+      .from('leave_requests')
+      .select('id,employee_id,status,supervisor_status,hr_status,start_date,end_date')
+      .eq('id', requestId)
+      .maybeSingle();
+
+    if (requestError) {
+      toast(friendlyError(requestError), 'error');
+      return;
+    }
+
+    if (!request) {
+      toast('Pengajuan cuti/izin tidak ditemukan.', 'error');
+      return;
+    }
+
+    if (request.supervisor_status !== 'approved' || request.status !== 'supervisor_approved') {
+      toast('Pengajuan belum disetujui SPV.', 'error');
+      return;
+    }
+
+    if (request.hr_status === 'approved' || request.status === 'approved') {
+      toast('Pengajuan ini sudah disetujui HR.', 'error');
+      return;
+    }
+
+    const isApprove = decision === 'approved';
+    const label = isApprove ? 'menyetujui' : 'menolak';
+
+    if (!confirm(`Anda yakin ingin ${label} pengajuan cuti/izin ini?`)) return;
+
+    let note = null;
+    if (!isApprove) {
+      note = (prompt('Catatan penolakan HR (opsional):') || '').trim() || null;
+    }
+
+    const now = new Date().toISOString();
+
+    const updatePayload = isApprove
+      ? {
+          hr_status: 'approved',
+          hr_approved_at: now,
+          hr_approved_by: profile.id,
+          status: 'approved',
+          hr_note: note
+        }
+      : {
+          hr_status: 'rejected',
+          hr_approved_at: now,
+          hr_approved_by: profile.id,
+          status: 'rejected',
+          hr_note: note
+        };
+
+    const { data: updated, error: updateError } = await sb
+      .from('leave_requests')
+      .update(updatePayload)
+      .eq('id', requestId)
+      .eq('status', 'supervisor_approved')
+      .select('id,status,supervisor_status,hr_status')
+      .maybeSingle();
+
+    if (updateError) {
+      toast(friendlyError(updateError), 'error');
+      return;
+    }
+
+    if (!updated) {
+      toast('Pengajuan tidak berubah. Pastikan status masih Disetujui SPV.', 'error');
+      return;
+    }
+
+    const { error: historyError } = await sb
+      .from('leave_approvals')
+      .insert({
+        leave_request_id: requestId,
+        approval_level: 'hr',
+        approver_profile_id: profile.id,
+        decision: decision,
+        note: note,
+        decided_at: now
+      });
+
+    if (historyError) {
+      console.error('leave_approvals HR:', historyError);
+      toast(
+        'Status pengajuan sudah berubah, tetapi riwayat approval HR gagal disimpan: ' +
+        friendlyError(historyError),
+        'error'
+      );
+    } else {
+      toast(
+        isApprove
+          ? 'Pengajuan berhasil disetujui HR. Proses selesai.'
+          : 'Pengajuan berhasil ditolak HR.'
+      );
+    }
+
+    if (typeof p6RefreshLeaveData === 'function') {
+      await p6RefreshLeaveData();
+    } else if (typeof loadAll === 'function') {
+      await loadAll();
+    }
+
+    if (typeof leave === 'function') leave();
+
+  } catch (err) {
+    console.error('phase6cApproveHR error:', err);
+    toast(friendlyError(err), 'error');
+  }
+};
+
+(function installPhase6cHRHandler() {
+  const original = window.p6Approve;
+
+  window.p6Approve = async function(id, level, decision) {
+    if (String(level).toLowerCase() === 'hr') {
+      return window.phase6cApproveHR(id, decision);
+    }
+
+    if (typeof original === 'function') {
+      return original(id, level, decision);
+    }
+
+    toast('Handler approval SPV tidak ditemukan.', 'error');
+  };
+
+  console.log('Phase 6C Fix Approval HR aktif.');
+})();
