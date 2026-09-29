@@ -3535,3 +3535,108 @@ console.log('HR Employee System Phase 6D-2 loaded: Employee Login + PIN + SPV Po
 
   console.log('Phase 6C loaded: Employee Portal + Approval Tim');
 })();
+/* PHASE 6C FIX — Tombol Setujui/Tolak Approval Tim
+   Tempelkan di PALING BAWAH app.js, lalu commit/push.
+   Fix: gunakan sb/state langsung (bukan window.sb/window.state).
+*/
+
+window.ep6cApprove = async function(requestId, decision) {
+  try {
+    const request = (state.leave || []).find(x => x.id === requestId);
+    if (!request) {
+      toast('Pengajuan tidak ditemukan.', 'error');
+      return;
+    }
+
+    const myEmployeeId = state.profile?.employee_id;
+    if (!myEmployeeId) {
+      toast('Akun Anda belum terhubung ke data karyawan.', 'error');
+      return;
+    }
+
+    const employee = (state.employees || []).find(x => x.id === request.employee_id);
+    if (!employee || employee.supervisor_employee_id !== myEmployeeId) {
+      toast('Anda bukan atasan langsung karyawan ini.', 'error');
+      return;
+    }
+
+    if (request.status !== 'pending') {
+      toast('Pengajuan ini sudah diproses atau tidak lagi menunggu SPV.', 'error');
+      return;
+    }
+
+    const label = decision === 'approved' ? 'menyetujui' : 'menolak';
+    const ok = confirm(`Anda yakin ingin ${label} pengajuan ${employee.full_name || 'karyawan ini'}?`);
+    if (!ok) return;
+
+    const note = decision === 'rejected'
+      ? (prompt('Alasan penolakan (opsional):') || '').trim()
+      : '';
+
+    const now = new Date().toISOString();
+    const updatePayload = decision === 'approved'
+      ? {
+          supervisor_status: 'approved',
+          supervisor_approved_at: now,
+          supervisor_approved_by: state.profile.id,
+          status: 'supervisor_approved',
+          supervisor_note: note || null
+        }
+      : {
+          supervisor_status: 'rejected',
+          supervisor_approved_at: now,
+          supervisor_approved_by: state.profile.id,
+          status: 'rejected',
+          supervisor_note: note || null
+        };
+
+    const { data: updated, error: updateError } = await sb
+      .from('leave_requests')
+      .update(updatePayload)
+      .eq('id', requestId)
+      .eq('status', 'pending')
+      .select('id,status,supervisor_status,hr_status');
+
+    if (updateError) {
+      toast(friendlyError(updateError), 'error');
+      return;
+    }
+
+    if (!updated || !updated.length) {
+      toast('Pengajuan tidak berubah. Kemungkinan policy RLS belum diperbarui.', 'error');
+      return;
+    }
+
+    const { error: approvalError } = await sb
+      .from('leave_approvals')
+      .insert({
+        leave_request_id: requestId,
+        approval_level: 'supervisor',
+        approver_profile_id: state.profile.id,
+        decision: decision,
+        note: note || null,
+        decided_at: now
+      });
+
+    if (approvalError) {
+      console.error('leave_approvals insert:', approvalError);
+      toast('Status pengajuan sudah berubah, tetapi riwayat approval gagal disimpan: ' + friendlyError(approvalError), 'error');
+    } else {
+      toast(decision === 'approved'
+        ? 'Pengajuan berhasil disetujui SPV dan diteruskan ke HR.'
+        : 'Pengajuan berhasil ditolak.');
+    }
+
+    await loadAll();
+    if (typeof ep6cRenderApproval === 'function') {
+      await ep6cRenderApproval();
+    } else if (state.view === 'leave') {
+      leave();
+    }
+  } catch (err) {
+    console.error('Approval Tim error:', err);
+    toast(friendlyError(err), 'error');
+  }
+};
+
+console.log('PHASE 6C FIX loaded — Approval Tim menggunakan sb/state langsung');
