@@ -131,14 +131,14 @@ async function loadAll() {
 
 /* ---------- Shell ---------- */
 function renderApp() {
-  const labels = { dashboard: 'Dashboard', employees: 'Karyawan', attendance: 'Absensi', contracts: 'Kontrak', leave: 'Cuti', warnings: 'Teguran / SP', master: 'Master Data' };
+  const labels = { dashboard: 'Dashboard', employees: 'Karyawan', attendance: 'Absensi', contracts: 'Kontrak', leave: 'Cuti', warnings: 'Teguran / SP', master: 'Master Data', calendar: 'Kalender Kerja' };
   document.querySelector('#app').innerHTML = `<div class="shell"><aside class="sidebar"><div class="logo">HR Employee System</div><div class="nav">${Object.keys(labels).map(v => `<button class="${state.view === v ? 'active' : ''}" data-view="${v}">${labels[v]}</button>`).join('')}</div></aside><main class="main"><div class="topbar"><h1>${title()}</h1><div class="userbox"><span>${esc(state.profile.full_name || state.session.user.email)} <span class="muted">(${esc(currentRole() || 'user')})</span></span><span class="avatar">${esc((state.profile.full_name || 'A')[0].toUpperCase())}</span><button id="logout" class="btn btn-light">Keluar</button></div></div><div id="content"></div></main></div>`;
   document.querySelectorAll('[data-view]').forEach(b => b.onclick = () => { state.view = b.dataset.view; renderApp(); });
   $('#logout').onclick = async () => { await sb.auth.signOut(); };
   renderView();
 }
 window.gotoView = v => { state.view = v; renderApp(); };
-function title() { return { dashboard: 'Dashboard', employees: 'Database Karyawan', attendance: 'Absensi Karyawan', contracts: 'Kontrak Karyawan', leave: 'Cuti Karyawan', warnings: 'Surat Teguran / SP', master: 'Master Data' }[state.view]; }
+function title() { return { dashboard: 'Dashboard', employees: 'Database Karyawan', attendance: 'Absensi Karyawan', contracts: 'Kontrak Karyawan', leave: 'Cuti Karyawan', warnings: 'Surat Teguran / SP', master: 'Master Data', calendar: 'Kalender Kerja' }[state.view]; }
 function renderView() {
   clearInterval(state.clockTimer);
   if (state.view === 'attendance') return attendance();
@@ -147,6 +147,7 @@ function renderView() {
   if (state.view === 'contracts') return contracts();
   if (state.view === 'leave') return leave();
   if (state.view === 'warnings') return warnings();
+  if (state.view === 'calendar') return calendarWork();
   master();
 }
 
@@ -4776,6 +4777,136 @@ window.phase6cApproveHR = async function(requestId, decision) {
 
   console.log('Phase 6C Fix Approval HR aktif.');
 })();
+
+/* =========================================================
+   PHASE 6D — GOOGLE CALENDAR / KALENDER KERJA
+   ========================================================= */
+let holidayCalendarYear = new Date().getFullYear();
+
+function holidayCalendarStatusBadge(status) {
+  if (status === 'success') return '<span class="badge badge-green">Berhasil</span>';
+  if (status === 'error') return '<span class="badge badge-red">Gagal</span>';
+  return '<span class="badge badge-yellow">Belum pernah sync</span>';
+}
+
+async function calendarWork() {
+  const content = document.querySelector('#content');
+  if (!content) return;
+  const year = Number(holidayCalendarYear || new Date().getFullYear());
+
+  content.innerHTML = `
+    <div class="section">
+      <div class="section-head">
+        <div>
+          <h2>Kalender Kerja & Hari Libur</h2>
+          <div class="muted">Tanggal merah nasional diambil dari Google Calendar Indonesia.</div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <label class="muted">Tahun</label>
+          <select id="holidayYear" style="min-width:110px">
+            ${Array.from({length: 7}, (_,i) => new Date().getFullYear()-1+i)
+              .map(y => `<option value="${y}" ${y===year?'selected':''}>${y}</option>`).join('')}
+          </select>
+          <button class="btn btn-primary" id="syncGoogleHolidayBtn">🔄 Sinkronkan Google</button>
+        </div>
+      </div>
+      <div id="holidayCalendarMeta" class="card empty">Memuat status kalender...</div>
+    </div>
+    <div class="section">
+      <div class="section-head">
+        <h2>Hari Libur ${year}</h2>
+        <span class="muted">Sumber: Google Calendar Indonesia</span>
+      </div>
+      <div id="holidayCalendarTable" class="card empty">Memuat data...</div>
+    </div>
+  `;
+
+  $('#holidayYear').onchange = () => {
+    holidayCalendarYear = Number($('#holidayYear').value);
+    calendarWork();
+  };
+
+  $('#syncGoogleHolidayBtn').onclick = async () => {
+    const btn = $('#syncGoogleHolidayBtn');
+    const selectedYear = Number($('#holidayYear').value);
+    btn.disabled = true;
+    btn.textContent = '⏳ Sinkronisasi...';
+    try {
+      const { data, error } = await sb.functions.invoke('sync-google-holidays', {
+        body: { year: selectedYear }
+      });
+      if (error) throw error;
+      if (!data?.success) throw new Error(data?.error || 'Sinkronisasi gagal.');
+      toast(`Google Calendar ${selectedYear} berhasil disinkronkan: ${data.inserted || 0} tanggal baru, ${data.updated || 0} diperbarui.`);
+      await calendarWork();
+    } catch (err) {
+      console.error('sync-google-holidays:', err);
+      toast(friendlyError(err), 'error');
+      btn.disabled = false;
+      btn.textContent = '🔄 Sinkronkan Google';
+    }
+  };
+
+  try {
+    const [sourceRes, holidayRes] = await Promise.all([
+      sb.from('leave_holiday_sources')
+        .select('source_name,calendar_id,is_active,last_synced_at,last_sync_year,last_sync_status,last_sync_message')
+        .eq('calendar_id', 'en.indonesian#holiday@group.v.calendar.google.com')
+        .maybeSingle(),
+      sb.from('leave_holidays')
+        .select('holiday_date,name,holiday_type,source,is_active,source_event_title')
+        .eq('source', 'google')
+        .gte('holiday_date', `${year}-01-01`)
+        .lt('holiday_date', `${year + 1}-01-01`)
+        .eq('is_active', true)
+        .order('holiday_date')
+    ]);
+    if (sourceRes.error) throw sourceRes.error;
+    if (holidayRes.error) throw holidayRes.error;
+
+    const source = sourceRes.data;
+    const rows = holidayRes.data || [];
+    const lastSync = source?.last_synced_at
+      ? new Date(source.last_synced_at).toLocaleString('id-ID') : '-';
+
+    $('#holidayCalendarMeta').className = 'card';
+    $('#holidayCalendarMeta').innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px">
+        <div><div class="muted">Sumber</div><b>${esc(source?.source_name || 'Google Calendar Indonesia')}</b></div>
+        <div><div class="muted">Status</div>${holidayCalendarStatusBadge(source?.last_sync_status)}</div>
+        <div><div class="muted">Terakhir Sinkronisasi</div><b>${esc(lastSync)}</b></div>
+        <div><div class="muted">Tahun Terakhir</div><b>${esc(source?.last_sync_year || '-')}</b></div>
+      </div>
+      ${source?.last_sync_message ? `<div class="muted" style="margin-top:12px">${esc(source.last_sync_message)}</div>` : ''}
+    `;
+
+    if (!rows.length) {
+      $('#holidayCalendarTable').className = 'card empty';
+      $('#holidayCalendarTable').innerHTML = `Belum ada tanggal merah Google untuk ${year}. Klik <b>Sinkronkan Google</b>.`;
+    } else {
+      $('#holidayCalendarTable').className = 'table-wrap';
+      $('#holidayCalendarTable').innerHTML = `
+        <table class="table">
+          <thead><tr><th>No</th><th>Tanggal</th><th>Hari</th><th>Keterangan</th><th>Sumber</th></tr></thead>
+          <tbody>
+            ${rows.map((r,i) => {
+              const d = new Date(`${r.holiday_date}T00:00:00`);
+              const day = d.toLocaleDateString('id-ID', { weekday: 'long' });
+              return `<tr><td>${i+1}</td><td><b>${fmtDate(r.holiday_date)}</b></td><td>${esc(day)}</td><td>${esc(r.name || r.source_event_title || '-')}</td><td><span class="badge badge-green">Google</span></td></tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      `;
+    }
+  } catch (err) {
+    console.error('calendarWork:', err);
+    $('#holidayCalendarMeta').className = 'card';
+    $('#holidayCalendarMeta').innerHTML = `<div class="error">${esc(friendlyError(err))}</div>`;
+    $('#holidayCalendarTable').className = 'card empty';
+    $('#holidayCalendarTable').textContent = 'Data kalender belum dapat dimuat.';
+  }
+}
+
 /* ============================================================
    PHASE 6C — FINAL FIX APPROVE HR (DIRECT CLICK INTERCEPTOR)
    Bypass handler lama yang masih menampilkan:
