@@ -5099,3 +5099,455 @@ window.phase6cFinalApproveHR = async function(requestId, decision) {
 
   console.log('Phase 6C FINAL APPROVE HR interceptor aktif.');
 })();
+
+
+
+/* ============================================================
+   PHASE 7 — PROFIL KARYAWAN / SELF SERVICE
+   Karyawan mengisi data pribadi sendiri melalui Portal Karyawan.
+   Data master HR (ID, nama, perusahaan, jabatan, departemen,
+   tanggal masuk, status kerja) tetap dikelola HR.
+   ============================================================ */
+
+async function phase7GetProfile() {
+  return await empRpc('employee_profile_get');
+}
+
+async function phase7SaveProfile(data) {
+  return await empRpc('employee_profile_save', { p_data: data });
+}
+
+async function phase7SubmitProfile() {
+  return await empRpc('employee_profile_submit');
+}
+
+function phase7Val(p, k) {
+  return esc(p?.[k] ?? '');
+}
+
+function phase7ProfileStatus(status) {
+  const map = {
+    draft: ['Belum selesai', 'badge-gray'],
+    submitted: ['Menunggu Verifikasi HR', 'badge-yellow'],
+    needs_revision: ['Perlu Perbaikan', 'badge-red'],
+    verified: ['Terverifikasi HR', 'badge-green']
+  };
+  const x = map[status] || [status || 'Belum diisi', 'badge-gray'];
+  return `<span class="badge ${x[1]}">${esc(x[0])}</span>`;
+}
+
+function phase7ProfileProgress(p) {
+  const fields = [
+    'nickname','gender','birth_place','birth_date','religion','marital_status',
+    'blood_type','citizenship','nik','kk_number','ktp_address','domicile_address',
+    'village','district','city','province','postal_code','emergency_name',
+    'emergency_relation','emergency_phone','education_level','major','school_name',
+    'shirt_size','pants_size','shoe_size'
+  ];
+  const done = fields.filter(k => String(p?.[k] ?? '').trim()).length;
+  return Math.round(done / fields.length * 100);
+}
+
+function phase7Input(name, label, value, type='text', placeholder='') {
+  return `<div class="field"><label>${label}</label><input name="${name}" type="${type}" value="${phase7Val(value,name)}" placeholder="${esc(placeholder)}"></div>`;
+}
+
+function phase7Textarea(name, label, value, full=true) {
+  return `<div class="field ${full ? 'field-full' : ''}"><label>${label}</label><textarea name="${name}" rows="3">${phase7Val(value,name)}</textarea></div>`;
+}
+
+async function phase7RenderProfile() {
+  const box = $('#epContent');
+  if (!box) return;
+
+  box.innerHTML = '<div class="card empty">Memuat Profil Saya...</div>';
+
+  try {
+    const data = await phase7GetProfile();
+    const p = data?.profile || {};
+    const e = data?.employee || empPortal.employee || {};
+    const status = p.status || 'draft';
+    const locked = status === 'submitted' || status === 'verified';
+    const progress = phase7ProfileProgress(p);
+
+    box.innerHTML = `
+      <div class="section">
+        <div class="section-head">
+          <div>
+            <h2>Profil Saya</h2>
+            <div class="muted">Lengkapi data pribadi Anda. Data master perusahaan tetap dikelola HR.</div>
+          </div>
+          ${phase7ProfileStatus(status)}
+        </div>
+
+        <div class="cards" style="margin-bottom:14px">
+          <div class="card">
+            <div class="muted">Karyawan</div>
+            <div class="metric" style="font-size:20px">${esc(e.full_name || '-')}</div>
+            <div class="muted">ID ${esc(e.employee_number || '-')}</div>
+          </div>
+          <div class="card">
+            <div class="muted">Kelengkapan Data Pribadi</div>
+            <div class="metric">${progress}%</div>
+          </div>
+          <div class="card">
+            <div class="muted">Status HR</div>
+            <div style="margin-top:8px">${phase7ProfileStatus(status)}</div>
+          </div>
+        </div>
+
+        ${status === 'needs_revision' && p.hr_note ? `<div class="info-box"><b>Catatan HR:</b><br>${esc(p.hr_note)}</div>` : ''}
+        ${status === 'submitted' ? `<div class="info-box">Data sudah dikirim ke HR. Sementara menunggu verifikasi, data tidak dapat diedit.</div>` : ''}
+        ${status === 'verified' ? `<div class="info-box">Profil sudah diverifikasi HR. Jika ada perubahan data, hubungi HR untuk membuka kembali profil.</div>` : ''}
+
+        <form id="phase7ProfileForm" class="modal-grid" style="margin-top:14px">
+          <div class="field field-full"><div class="sub-title">Data Pribadi</div></div>
+          ${phase7Input('nickname','Nama Panggilan',p)}
+          ${phase7Input('gender','Jenis Kelamin',p,'text','Laki-laki / Perempuan')}
+          ${phase7Input('birth_place','Tempat Lahir',p)}
+          ${phase7Input('birth_date','Tanggal Lahir',p,'date')}
+          ${phase7Input('religion','Agama',p)}
+          ${phase7Input('marital_status','Status Perkawinan',p)}
+          ${phase7Input('blood_type','Golongan Darah',p)}
+          ${phase7Input('citizenship','Kewarganegaraan',p,'text','WNI / WNA')}
+          ${phase7Input('personal_phone','No. HP Pribadi',p,'tel')}
+          ${phase7Input('personal_email','Email Pribadi',p,'email')}
+
+          <div class="field field-full"><div class="sub-title">Identitas</div></div>
+          ${phase7Input('nik','No. KTP / NIK',p)}
+          ${phase7Input('kk_number','No. KK',p)}
+          ${phase7Input('npwp','NPWP',p)}
+          ${phase7Input('postal_code','Kode Pos',p)}
+
+          <div class="field field-full"><div class="sub-title">Alamat</div></div>
+          ${phase7Textarea('ktp_address','Alamat KTP',p)}
+          ${phase7Textarea('domicile_address','Alamat Domisili',p)}
+          ${phase7Input('village','Kelurahan / Desa',p)}
+          ${phase7Input('district','Kecamatan',p)}
+          ${phase7Input('city','Kota / Kabupaten',p)}
+          ${phase7Input('province','Provinsi',p)}
+
+          <div class="field field-full"><div class="sub-title">Kontak Darurat</div></div>
+          ${phase7Input('emergency_name','Nama Kontak Darurat',p)}
+          ${phase7Input('emergency_relation','Hubungan',p)}
+          ${phase7Input('emergency_phone','No. HP Kontak Darurat',p,'tel')}
+
+          <div class="field field-full"><div class="sub-title">Pendidikan</div></div>
+          ${phase7Input('education_level','Pendidikan Terakhir',p)}
+          ${phase7Input('major','Jurusan',p)}
+          ${phase7Input('school_name','Nama Sekolah / Universitas',p)}
+
+          <div class="field field-full"><div class="sub-title">Ukuran Seragam</div></div>
+          ${phase7Input('shirt_size','Ukuran Baju',p)}
+          ${phase7Input('pants_size','Ukuran Celana',p)}
+          ${phase7Input('shoe_size','Ukuran Sepatu',p)}
+
+          <div class="field field-full"><div class="sub-title">Data Pembayaran</div><div class="muted">Data rekening dapat diisi bila diperlukan oleh perusahaan.</div></div>
+          ${phase7Input('bank_name','Bank',p)}
+          ${phase7Input('bank_account','Nomor Rekening',p)}
+          ${phase7Input('bank_account_name','Nama Pemilik Rekening',p)}
+
+          <div class="field field-full" style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;margin-top:8px">
+            <button type="button" class="btn btn-light" id="phase7SaveBtn" ${locked ? 'disabled' : ''}>Simpan Draft</button>
+            <button type="button" class="btn btn-primary" id="phase7SubmitBtn" ${locked ? 'disabled' : ''}>Kirim ke HR untuk Verifikasi</button>
+          </div>
+        </form>
+      </div>
+    `;
+
+    const form = $('#phase7ProfileForm');
+    const collect = () => {
+      const fd = new FormData(form);
+      const out = {};
+      for (const [k,v] of fd.entries()) out[k] = String(v || '').trim() || null;
+      return out;
+    };
+
+    $('#phase7SaveBtn')?.addEventListener('click', async () => {
+      const btn = $('#phase7SaveBtn');
+      btn.disabled = true;
+      try {
+        await phase7SaveProfile(collect());
+        toast('Profil berhasil disimpan sebagai draft.');
+        await phase7RenderProfile();
+      } catch (err) {
+        toast(friendlyError(err), 'error');
+        btn.disabled = false;
+      }
+    });
+
+    $('#phase7SubmitBtn')?.addEventListener('click', async () => {
+      if (!confirm('Kirim profil ke HR untuk diverifikasi? Setelah dikirim, data tidak dapat diedit sampai HR memberikan hasil verifikasi.')) return;
+      const btn = $('#phase7SubmitBtn');
+      btn.disabled = true;
+      try {
+        await phase7SaveProfile(collect());
+        await phase7SubmitProfile();
+        toast('Profil berhasil dikirim ke HR untuk verifikasi.');
+        await phase7RenderProfile();
+      } catch (err) {
+        toast(friendlyError(err), 'error');
+        btn.disabled = false;
+      }
+    });
+  } catch (err) {
+    box.innerHTML = `<div class="card"><div class="error">${esc(friendlyError(err))}</div></div>`;
+  }
+}
+
+async function phase7HomeStatus() {
+  const box = $('#epContent');
+  if (!box) return;
+  try {
+    const data = await phase7GetProfile();
+    const p = data?.profile || {};
+    const status = p.status || 'draft';
+    const progress = phase7ProfileProgress(p);
+    const card = document.createElement('div');
+    card.className = 'section';
+    card.id = 'phase7HomeCard';
+    card.innerHTML = `
+      <div class="section-head">
+        <div>
+          <h2>Profil Saya</h2>
+          <div class="muted">Lengkapi data pribadi Anda sendiri.</div>
+        </div>
+        ${phase7ProfileStatus(status)}
+      </div>
+      <div class="cards">
+        <div class="card"><div class="muted">Kelengkapan</div><div class="metric">${progress}%</div></div>
+        <div class="card"><div class="muted">Status</div><div style="margin-top:8px">${phase7ProfileStatus(status)}</div></div>
+        <div class="card"><button class="btn btn-primary" onclick="employeePortalView('profile')">Buka Profil Saya</button></div>
+      </div>
+    `;
+    box.appendChild(card);
+  } catch (err) {
+    console.error('Phase 7 profile home:', err);
+  }
+}
+
+/* ---------- Portal navigation wrapper ---------- */
+const __phase7OriginalEmployeePortalView = employeePortalView;
+employeePortalView = async function(view) {
+  if (view === 'profile') return phase7RenderProfile();
+  await __phase7OriginalEmployeePortalView(view);
+  if (view === 'home') await phase7HomeStatus();
+};
+
+const __phase7OriginalRenderEmployeePortal = renderEmployeePortal;
+renderEmployeePortal = async function() {
+  await __phase7OriginalRenderEmployeePortal();
+  const nav = document.querySelector('.sidebar .nav');
+  if (nav && !document.getElementById('phase7ProfileNav')) {
+    const b = document.createElement('button');
+    b.id = 'phase7ProfileNav';
+    b.type = 'button';
+    b.textContent = 'Profil Saya';
+    b.addEventListener('click', () => employeePortalView('profile'));
+    const leave = [...nav.querySelectorAll('button')].find(x => /Cuti/i.test(x.textContent || ''));
+    if (leave) nav.insertBefore(b, leave);
+    else nav.appendChild(b);
+  }
+};
+
+/* ============================================================
+   PHASE 7 HR — VERIFIKASI PROFIL KARYAWAN
+   ============================================================ */
+
+function phase7AdminStatus(status) {
+  const map = {
+    draft: ['Draft', 'badge-gray'],
+    submitted: ['Menunggu HR', 'badge-yellow'],
+    needs_revision: ['Perlu Perbaikan', 'badge-red'],
+    verified: ['Terverifikasi', 'badge-green']
+  };
+  const x = map[status] || [status || '-', 'badge-gray'];
+  return `<span class="badge ${x[1]}">${esc(x[0])}</span>`;
+}
+
+async function phase7AdminProfileDetail(id) {
+  const { data, error } = await sb.from('employee_self_profiles')
+    .select('*, employees(full_name,employee_number,company_id,department_id,position_id,join_date)')
+    .eq('employee_id', id)
+    .single();
+  if (error) { toast(friendlyError(error), 'error'); return; }
+
+  const p = data;
+  const rows = [
+    ['Nama Panggilan', p.nickname],
+    ['Jenis Kelamin', p.gender],
+    ['Tempat / Tanggal Lahir', [p.birth_place, fmtDate(p.birth_date)].filter(Boolean).join(' / ')],
+    ['Agama', p.religion],
+    ['Status Perkawinan', p.marital_status],
+    ['Golongan Darah', p.blood_type],
+    ['Kewarganegaraan', p.citizenship],
+    ['No. HP Pribadi', p.personal_phone],
+    ['Email Pribadi', p.personal_email],
+    ['NIK', p.nik],
+    ['No. KK', p.kk_number],
+    ['NPWP', p.npwp],
+    ['Alamat KTP', p.ktp_address],
+    ['Alamat Domisili', p.domicile_address],
+    ['Kelurahan', p.village],
+    ['Kecamatan', p.district],
+    ['Kota/Kabupaten', p.city],
+    ['Provinsi', p.province],
+    ['Kode Pos', p.postal_code],
+    ['Kontak Darurat', [p.emergency_name,p.emergency_relation,p.emergency_phone].filter(Boolean).join(' — ')],
+    ['Pendidikan', [p.education_level,p.major,p.school_name].filter(Boolean).join(' — ')],
+    ['Ukuran', [p.shirt_size,p.pants_size,p.shoe_size].filter(Boolean).join(' / ')],
+    ['Bank', p.bank_name],
+    ['No. Rekening', p.bank_account],
+    ['Nama Pemilik Rekening', p.bank_account_name]
+  ];
+
+  const body = `
+    <div class="info-box">
+      <b>${esc(p.employees?.full_name || '-')}</b> — ${esc(p.employees?.employee_number || '-')}<br>
+      Status: ${phase7AdminStatus(p.status)}
+      ${p.submitted_at ? `<br><span class="muted">Dikirim: ${esc(fmtDateTime(p.submitted_at))}</span>` : ''}
+    </div>
+    <div class="detail-grid">
+      ${rows.map(([k,v]) => `<div class="detail-item"><div class="muted">${esc(k)}</div><div>${esc(v || '-')}</div></div>`).join('')}
+    </div>
+    ${p.hr_note ? `<div class="info-box" style="margin-top:12px"><b>Catatan HR:</b><br>${esc(p.hr_note)}</div>` : ''}
+  `;
+
+  const modal = openModal(
+    'Detail Profil Karyawan',
+    body,
+    async () => true,
+    'Tutup'
+  );
+
+  const submit = modal.querySelector('button[type="submit"]');
+  if (submit) {
+    submit.style.display = 'none';
+    const actions = modal.querySelector('.modal-actions');
+    if (actions) {
+      const approve = document.createElement('button');
+      approve.type = 'button';
+      approve.className = 'btn btn-primary';
+      approve.textContent = 'Verifikasi';
+      approve.disabled = p.status === 'verified';
+      approve.onclick = () => phase7AdminVerify(id, 'verified', modal);
+      const revise = document.createElement('button');
+      revise.type = 'button';
+      revise.className = 'btn btn-light';
+      revise.textContent = 'Minta Perbaikan';
+      revise.disabled = p.status === 'verified';
+      revise.onclick = () => phase7AdminVerify(id, 'needs_revision', modal);
+      actions.insertBefore(revise, actions.firstChild);
+      actions.insertBefore(approve, actions.firstChild);
+    }
+  }
+}
+
+async function phase7AdminVerify(employeeId, status, modal) {
+  let note = null;
+  if (status === 'needs_revision') {
+    note = (prompt('Catatan perbaikan untuk karyawan (opsional):') || '').trim() || null;
+  } else if (!confirm('Tandai profil ini sebagai sudah diverifikasi HR?')) {
+    return;
+  }
+
+  try {
+    const { data, error } = await sb.rpc('employee_profile_verify_self', {
+      p_employee_id: employeeId,
+      p_status: status,
+      p_note: note
+    });
+    if (error) throw error;
+    if (!data?.success) throw new Error(data?.message || 'Verifikasi gagal.');
+    toast(status === 'verified' ? 'Profil berhasil diverifikasi HR.' : 'Profil dikembalikan ke karyawan untuk diperbaiki.');
+    modal?.remove();
+    await phase7AdminProfiles();
+  } catch (err) {
+    toast(friendlyError(err), 'error');
+  }
+}
+
+async function phase7AdminProfiles() {
+  const content = $('#content');
+  if (!content) return;
+  content.innerHTML = `
+    <div class="section">
+      <div class="section-head">
+        <div><h2>Profil Karyawan</h2><div class="muted">Data pribadi yang diisi sendiri oleh karyawan dan menunggu verifikasi HR.</div></div>
+        <button class="btn btn-light" id="phase7AdminRefresh">Refresh</button>
+      </div>
+      <div class="cards">
+        <div class="card"><div class="muted">Menunggu HR</div><div class="metric" id="phase7PendingCount">...</div></div>
+        <div class="card"><div class="muted">Perlu Perbaikan</div><div class="metric" id="phase7RevisionCount">...</div></div>
+        <div class="card"><div class="muted">Terverifikasi</div><div class="metric" id="phase7VerifiedCount">...</div></div>
+      </div>
+    </div>
+    <div class="section">
+      <div id="phase7AdminBody" class="card empty">Memuat...</div>
+    </div>
+  `;
+
+  $('#phase7AdminRefresh').onclick = phase7AdminProfiles;
+
+  try {
+    const { data, error } = await sb.from('employee_self_profiles')
+      .select('employee_id,status,submitted_at,updated_at,employees(full_name,employee_number,companies(name),departments(name),positions(name))')
+      .order('updated_at', { ascending: false });
+    if (error) throw error;
+
+    const rows = data || [];
+    $('#phase7PendingCount').textContent = rows.filter(x => x.status === 'submitted').length;
+    $('#phase7RevisionCount').textContent = rows.filter(x => x.status === 'needs_revision').length;
+    $('#phase7VerifiedCount').textContent = rows.filter(x => x.status === 'verified').length;
+
+    $('#phase7AdminBody').className = 'table-wrap';
+    $('#phase7AdminBody').innerHTML = rows.length ? `
+      <table class="table">
+        <thead><tr><th>Karyawan</th><th>Perusahaan</th><th>Status</th><th>Dikirim</th><th>Aksi</th></tr></thead>
+        <tbody>
+          ${rows.map(r => `<tr>
+            <td><b>${esc(r.employees?.full_name || '-')}</b><div class="muted">${esc(r.employees?.employee_number || '-')}</div></td>
+            <td>${esc(r.employees?.companies?.name || '-')}</td>
+            <td>${phase7AdminStatus(r.status)}</td>
+            <td>${r.submitted_at ? fmtDateTime(r.submitted_at) : '-'}</td>
+            <td><button class="btn btn-light btn-sm" onclick="phase7AdminProfileDetail('${esc(r.employee_id)}')">Detail / Verifikasi</button></td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    ` : '<div class="card empty">Belum ada profil yang dibuat karyawan.</div>';
+  } catch (err) {
+    $('#phase7AdminBody').className = 'card';
+    $('#phase7AdminBody').innerHTML = `<div class="error">${esc(friendlyError(err))}</div>`;
+  }
+}
+
+const __phase7OriginalTitle = title;
+title = function() {
+  if (state.view === 'employee_profiles') return 'Profil Karyawan';
+  return __phase7OriginalTitle();
+};
+
+const __phase7OriginalRenderView = renderView;
+renderView = function() {
+  if (state.view === 'employee_profiles') return phase7AdminProfiles();
+  return __phase7OriginalRenderView();
+};
+
+const __phase7OriginalRenderApp = renderApp;
+renderApp = function() {
+  __phase7OriginalRenderApp();
+  const nav = document.querySelector('.sidebar .nav');
+  if (!nav || document.getElementById('phase7AdminNav')) return;
+  const b = document.createElement('button');
+  b.id = 'phase7AdminNav';
+  b.type = 'button';
+  b.textContent = 'Profil Karyawan';
+  b.dataset.view = 'employee_profiles';
+  b.className = state.view === 'employee_profiles' ? 'active' : '';
+  b.onclick = () => { state.view = 'employee_profiles'; renderApp(); };
+  const masterBtn = [...nav.querySelectorAll('button')].find(x => /Master Data/i.test(x.textContent || ''));
+  if (masterBtn) nav.insertBefore(b, masterBtn);
+  else nav.appendChild(b);
+};
+
+console.log('Phase 7 — Employee Self Profile + HR Verification loaded.');
