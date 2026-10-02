@@ -5152,8 +5152,169 @@ function phase7Input(name, label, value, type='text', placeholder='') {
   return `<div class="field"><label>${label}</label><input name="${name}" type="${type}" value="${phase7Val(value,name)}" placeholder="${esc(placeholder)}"></div>`;
 }
 
+function phase7Select(name, label, value, id, placeholder='Pilih...') {
+  const current = phase7Val(value, name);
+  return `<div class="field"><label>${label}</label><select name="${name}" id="${id}" data-current="${current}"><option value="">${placeholder}</option></select></div>`;
+}
+
 function phase7Textarea(name, label, value, full=true) {
   return `<div class="field ${full ? 'field-full' : ''}"><label>${label}</label><textarea name="${name}" rows="3">${phase7Val(value,name)}</textarea></div>`;
+}
+
+/* ============================================================
+   PHASE 7 — WILAYAH INDONESIA OTOMATIS
+   Provinsi -> Kota/Kabupaten -> Kecamatan -> Kelurahan/Desa
+   Kode Pos mengikuti Kelurahan/Desa yang dipilih.
+   Data diambil bertingkat agar browser tidak memuat seluruh
+   puluhan ribu desa sekaligus.
+   ============================================================ */
+const PHASE7_REGION_API = 'https://www.emsifa.com/api-wilayah-indonesia/v2';
+
+async function phase7RegionFetch(path) {
+  const res = await fetch(`${PHASE7_REGION_API}/${path}`, {
+    headers: { 'Accept': 'application/json' }
+  });
+  if (!res.ok) throw new Error(`Gagal memuat data wilayah (${res.status}).`);
+  const json = await res.json();
+  return json?.data ?? json;
+}
+
+function phase7RegionSetOptions(select, items, selectedName='', placeholder='Pilih...') {
+  if (!select) return;
+  const selected = String(selectedName || '').trim().toLowerCase();
+  const options = [`<option value="">${placeholder}</option>`];
+  for (const item of (items || [])) {
+    const id = String(item?.id ?? '');
+    const name = String(item?.name ?? '');
+    if (!id || !name) continue;
+    const isSelected = name.trim().toLowerCase() === selected ? ' selected' : '';
+    const postal = item?.postal_code ? ` data-postal-code="${esc(item.postal_code)}"` : '';
+    options.push(`<option value="${esc(id)}" data-name="${esc(name)}"${postal}${isSelected}>${esc(name)}</option>`);
+  }
+  select.innerHTML = options.join('');
+  select.disabled = false;
+}
+
+function phase7RegionSetLoading(select, text='Memuat...') {
+  if (!select) return;
+  select.innerHTML = `<option value="">${text}</option>`;
+  select.disabled = true;
+}
+
+function phase7RegionSelectedName(select) {
+  return select?.selectedOptions?.[0]?.dataset?.name || '';
+}
+
+async function phase7InitRegions(p, locked=false) {
+  const province = document.getElementById('phase7Province');
+  const city = document.getElementById('phase7City');
+  const district = document.getElementById('phase7District');
+  const village = document.getElementById('phase7Village');
+  const postal = document.getElementById('phase7PostalCode');
+  if (!province || !city || !district || !village || !postal) return;
+
+  const savedProvince = String(p?.province || '');
+  const savedCity = String(p?.city || '');
+  const savedDistrict = String(p?.district || '');
+  const savedVillage = String(p?.village || '');
+  const savedPostal = String(p?.postal_code || '');
+
+  try {
+    phase7RegionSetLoading(province);
+    phase7RegionSetLoading(city);
+    phase7RegionSetLoading(district);
+    phase7RegionSetLoading(village);
+
+    const provinces = await phase7RegionFetch('provinces.json');
+    phase7RegionSetOptions(province, provinces, savedProvince, 'Pilih Provinsi');
+
+    const findByName = (items, name) => (items || []).find(x =>
+      String(x?.name || '').trim().toLowerCase() === String(name || '').trim().toLowerCase()
+    );
+
+    const loadVillages = async (keepValue=true) => {
+      const districtId = district.value;
+      phase7RegionSetLoading(village);
+      postal.value = '';
+      if (!districtId) {
+        phase7RegionSetOptions(village, [], '', 'Pilih Kelurahan / Desa');
+        return;
+      }
+      const villages = await phase7RegionFetch(`villages/${encodeURIComponent(districtId)}.json`);
+      phase7RegionSetOptions(village, villages, keepValue ? savedVillage : '', 'Pilih Kelurahan / Desa');
+      const selectedVillage = findByName(villages, keepValue ? savedVillage : '');
+      postal.value = selectedVillage?.postal_code || '';
+    };
+
+    const loadDistricts = async (keepValue=true) => {
+      const regencyId = city.value;
+      phase7RegionSetLoading(district);
+      phase7RegionSetLoading(village);
+      postal.value = '';
+      if (!regencyId) {
+        phase7RegionSetOptions(district, [], '', 'Pilih Kecamatan');
+        return;
+      }
+      const districts = await phase7RegionFetch(`districts/${encodeURIComponent(regencyId)}.json`);
+      phase7RegionSetOptions(district, districts, keepValue ? savedDistrict : '', 'Pilih Kecamatan');
+      await loadVillages(keepValue);
+    };
+
+    const loadRegencies = async (keepValue=true) => {
+      const provinceId = province.value;
+      phase7RegionSetLoading(city);
+      phase7RegionSetLoading(district);
+      phase7RegionSetLoading(village);
+      postal.value = '';
+      if (!provinceId) {
+        phase7RegionSetOptions(city, [], '', 'Pilih Kota / Kabupaten');
+        return;
+      }
+      const regencies = await phase7RegionFetch(`regencies/${encodeURIComponent(provinceId)}.json`);
+      phase7RegionSetOptions(city, regencies, keepValue ? savedCity : '', 'Pilih Kota / Kabupaten');
+      await loadDistricts(keepValue);
+    };
+
+    province.onchange = async () => {
+      try { await loadRegencies(false); }
+      catch (err) { toast(friendlyError(err), 'error'); }
+    };
+    city.onchange = async () => {
+      try { await loadDistricts(false); }
+      catch (err) { toast(friendlyError(err), 'error'); }
+    };
+    district.onchange = async () => {
+      try { await loadVillages(false); }
+      catch (err) { toast(friendlyError(err), 'error'); }
+    };
+    village.onchange = () => {
+      const opt = village.selectedOptions?.[0];
+      postal.value = opt?.dataset?.postalCode || '';
+    };
+
+    const savedProvinceItem = findByName(provinces, savedProvince);
+    if (savedProvinceItem) {
+      province.value = String(savedProvinceItem.id);
+      await loadRegencies(true);
+      const selectedVillage = village.selectedOptions?.[0];
+      if (selectedVillage?.dataset?.postalCode) postal.value = selectedVillage.dataset.postalCode;
+      else if (savedPostal) postal.value = savedPostal;
+    } else {
+      phase7RegionSetOptions(city, [], '', 'Pilih Kota / Kabupaten');
+      phase7RegionSetOptions(district, [], '', 'Pilih Kecamatan');
+      phase7RegionSetOptions(village, [], '', 'Pilih Kelurahan / Desa');
+      postal.value = savedPostal;
+    }
+
+    province.disabled = locked;
+    city.disabled = locked;
+    district.disabled = locked;
+    village.disabled = locked;
+    postal.readOnly = true;
+  } catch (err) {
+    console.error('Phase 7 region loader:', err);
+    toast('Data wilayah belum dapat dimuat. Silakan coba lagi.', 'error');
+  }
 }
 
 async function phase7RenderProfile() {
@@ -5217,15 +5378,14 @@ async function phase7RenderProfile() {
           ${phase7Input('nik','No. KTP / NIK',p)}
           ${phase7Input('kk_number','No. KK',p)}
           ${phase7Input('npwp','NPWP',p)}
-          ${phase7Input('postal_code','Kode Pos',p)}
-
           <div class="field field-full"><div class="sub-title">Alamat</div></div>
           ${phase7Textarea('ktp_address','Alamat KTP',p)}
           ${phase7Textarea('domicile_address','Alamat Domisili',p)}
-          ${phase7Input('village','Kelurahan / Desa',p)}
-          ${phase7Input('district','Kecamatan',p)}
-          ${phase7Input('city','Kota / Kabupaten',p)}
-          ${phase7Input('province','Provinsi',p)}
+          ${phase7Select('province','Provinsi',p,'phase7Province','Pilih Provinsi')}
+          ${phase7Select('city','Kota / Kabupaten',p,'phase7City','Pilih Kota / Kabupaten')}
+          ${phase7Select('district','Kecamatan',p,'phase7District','Pilih Kecamatan')}
+          ${phase7Select('village','Kelurahan / Desa',p,'phase7Village','Pilih Kelurahan / Desa')}
+          ${phase7Input('postal_code','Kode Pos',p,'text','Otomatis dari Kelurahan / Desa')}
 
           <div class="field field-full"><div class="sub-title">Kontak Darurat</div></div>
           ${phase7Input('emergency_name','Nama Kontak Darurat',p)}
@@ -5256,10 +5416,20 @@ async function phase7RenderProfile() {
     `;
 
     const form = $('#phase7ProfileForm');
+    const postalInput = form.querySelector('[name="postal_code"]');
+    if (postalInput) postalInput.id = 'phase7PostalCode';
+    await phase7InitRegions(p, locked);
+
+    /* Dropdown menyimpan nama wilayah agar kompatibel dengan schema Phase 7 saat ini. */
     const collect = () => {
       const fd = new FormData(form);
       const out = {};
       for (const [k,v] of fd.entries()) out[k] = String(v || '').trim() || null;
+      out.province = phase7RegionSelectedName(document.getElementById('phase7Province')) || out.province || null;
+      out.city = phase7RegionSelectedName(document.getElementById('phase7City')) || out.city || null;
+      out.district = phase7RegionSelectedName(document.getElementById('phase7District')) || out.district || null;
+      out.village = phase7RegionSelectedName(document.getElementById('phase7Village')) || out.village || null;
+      out.postal_code = String(document.getElementById('phase7PostalCode')?.value || out.postal_code || '').trim() || null;
       return out;
     };
 
