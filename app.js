@@ -5745,3 +5745,171 @@ renderApp = function() {
 };
 
 console.log('Phase 7 — Employee Self Profile + HR Verification loaded.');
+
+/* =====================================================================
+   PHASE 9C — PENGINGAT KONTRAK 30 / 14 / 7 HARI
+   Menimpa tampilan contracts() tanpa menghapus modul sebelumnya.
+   Tidak membutuhkan SQL tambahan; memakai data state.contracts.
+   ===================================================================== */
+
+function p9cDaysRemaining(c) {
+  if (!c?.end_date) return null;
+  return daysUntil(c.end_date);
+}
+
+function p9cReminderLevel(c) {
+  const n = p9cDaysRemaining(c);
+  if (n === null) return null;
+  if (n < 0) return 'expired';
+  if (n <= 7) return '7';
+  if (n <= 14) return '14';
+  if (n <= 30) return '30';
+  return null;
+}
+
+function p9cReminderBadge(c) {
+  const n = p9cDaysRemaining(c);
+  if (n === null) return '';
+  if (n < 0) return '<span class="badge badge-red">Sudah berakhir</span>';
+  if (n <= 7) return `<span class="badge badge-red">${n} hari lagi</span>`;
+  if (n <= 14) return `<span class="badge badge-yellow">${n} hari lagi</span>`;
+  if (n <= 30) return `<span class="badge badge-yellow">${n} hari lagi</span>`;
+  return `<span class="badge badge-green">${n} hari lagi</span>`;
+}
+
+function p9cContractType(c) {
+  if (typeof cgTypeLabel === 'function') return cgTypeLabel(c?.contract_type);
+  if (typeof contractTypeLabel === 'function') return contractTypeLabel(c?.contract_type);
+  return c?.contract_type || '-';
+}
+
+function p9cEmployee(c) {
+  return state.employees.find(e => e.id === c.employee_id) || null;
+}
+
+function p9cOpenEmployeeContract(id) {
+  const c = state.contracts.find(x => x.id === id);
+  if (!c) return;
+  contractForm(id);
+}
+
+function contracts() {
+  const rows = state.contracts || [];
+  const today = todayJakarta();
+  const active = rows.filter(c => c.status === 'active');
+  const expired = rows.filter(c => c.end_date && c.end_date < today);
+  const exp30 = rows.filter(c => c.status === 'active' && p9cDaysRemaining(c) !== null && p9cDaysRemaining(c) >= 0 && p9cDaysRemaining(c) <= 30);
+  const exp14 = rows.filter(c => c.status === 'active' && p9cDaysRemaining(c) !== null && p9cDaysRemaining(c) >= 0 && p9cDaysRemaining(c) <= 14);
+  const exp7 = rows.filter(c => c.status === 'active' && p9cDaysRemaining(c) !== null && p9cDaysRemaining(c) >= 0 && p9cDaysRemaining(c) <= 7);
+  const drafts = rows.filter(c => c.status === 'draft');
+
+  const reminderRows = rows
+    .filter(c => c.status === 'active' && p9cDaysRemaining(c) !== null && p9cDaysRemaining(c) >= 0 && p9cDaysRemaining(c) <= 30)
+    .sort((a,b) => p9cDaysRemaining(a) - p9cDaysRemaining(b));
+
+  const expiredRows = rows
+    .filter(c => c.end_date && c.end_date < today && c.status !== 'cancelled')
+    .sort((a,b) => String(b.end_date).localeCompare(String(a.end_date)));
+
+  $('#content').innerHTML = `
+    <div class="section">
+      <div class="section-head">
+        <div>
+          <h2>Daftar Kontrak</h2>
+          <div class="muted">${rows.length} dokumen kontrak tersimpan</div>
+        </div>
+        <div class="row-actions">
+          <button class="btn btn-light" onclick="importContractDocument()">📄 Import Dokumen</button>
+          <button class="btn btn-primary" onclick="cgOpenGenerator()">📝 Buat Kontrak</button>
+          <button class="btn btn-light" onclick="contractForm()">+ Tambah Kontrak</button>
+        </div>
+      </div>
+
+      <div class="cards" style="margin-bottom:14px">
+        <div class="card"><div class="muted">Aktif</div><div class="metric">${active.length}</div></div>
+        <div class="card"><div class="muted">Berakhir ≤ 30 Hari</div><div class="metric">${exp30.length}</div></div>
+        <div class="card"><div class="muted">Berakhir ≤ 14 Hari</div><div class="metric">${exp14.length}</div></div>
+        <div class="card"><div class="muted">Berakhir ≤ 7 Hari</div><div class="metric">${exp7.length}</div></div>
+        <div class="card"><div class="muted">Sudah Berakhir</div><div class="metric">${expired.length}</div></div>
+        <div class="card"><div class="muted">Draft</div><div class="metric">${drafts.length}</div></div>
+      </div>
+
+      ${reminderRows.length ? `
+        <div class="section" style="margin-top:14px">
+          <div class="section-head">
+            <div>
+              <h2>🔔 Pengingat Kontrak</h2>
+              <div class="muted">Kontrak aktif yang akan berakhir dalam 30 hari atau kurang.</div>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table class="table">
+              <thead><tr><th>Karyawan</th><th>Jenis</th><th>No. Dokumen</th><th>Tanggal Berakhir</th><th>Sisa</th><th>Aksi</th></tr></thead>
+              <tbody>${reminderRows.map(c => {
+                const e = p9cEmployee(c);
+                return `<tr>
+                  <td><b>${esc(e?.full_name || '-')}</b><div class="muted">${esc(e?.employee_number || '')}</div></td>
+                  <td>${esc(p9cContractType(c))}</td>
+                  <td>${esc(c.contract_number || '-')}</td>
+                  <td>${fmtDate(c.end_date)}</td>
+                  <td>${p9cReminderBadge(c)}</td>
+                  <td><button class="btn btn-light btn-sm" onclick="p9cOpenEmployeeContract('${esc(c.id)}')">Lihat Kontrak</button></td>
+                </tr>`;
+              }).join('')}</tbody>
+            </table>
+          </div>
+        </div>
+      ` : `
+        <div class="card" style="margin-top:14px">
+          <b>✅ Tidak ada kontrak yang akan berakhir dalam 30 hari.</b>
+          <div class="muted" style="margin-top:4px">PKWTT tanpa tanggal berakhir tidak masuk pengingat.</div>
+        </div>
+      `}
+
+      ${expiredRows.length ? `
+        <div class="section" style="margin-top:14px">
+          <div class="section-head"><div><h2>🔴 Kontrak Sudah Berakhir</h2><div class="muted">Perlu ditindaklanjuti oleh HR.</div></div></div>
+          <div class="table-wrap">
+            <table class="table">
+              <thead><tr><th>Karyawan</th><th>Jenis</th><th>No. Dokumen</th><th>Berakhir</th><th>Status</th><th>Aksi</th></tr></thead>
+              <tbody>${expiredRows.map(c => {
+                const e = p9cEmployee(c);
+                return `<tr>
+                  <td><b>${esc(e?.full_name || '-')}</b><div class="muted">${esc(e?.employee_number || '')}</div></td>
+                  <td>${esc(p9cContractType(c))}</td>
+                  <td>${esc(c.contract_number || '-')}</td>
+                  <td>${fmtDate(c.end_date)} ${p9cReminderBadge(c)}</td>
+                  <td>${contractStatusBadge(c.status)}</td>
+                  <td><button class="btn btn-light btn-sm" onclick="p9cOpenEmployeeContract('${esc(c.id)}')">Lihat Kontrak</button></td>
+                </tr>`;
+              }).join('')}</tbody>
+            </table>
+          </div>
+        </div>
+      ` : ''}
+
+      ${rows.length ? `
+        <div class="section" style="margin-top:14px">
+          <div class="section-head"><div><h2>Semua Kontrak</h2></div></div>
+          <div class="table-wrap">
+            <table class="table">
+              <thead><tr><th>Karyawan</th><th>No. Dokumen</th><th>Jenis</th><th>Mulai</th><th>Berakhir</th><th>Status</th><th>Aksi</th></tr></thead>
+              <tbody>${rows.map(c => {
+                const e = p9cEmployee(c);
+                const n = p9cDaysRemaining(c);
+                return `<tr>
+                  <td><b>${esc(e?.full_name || '-')}</b><div class="muted">${esc(e?.employee_number || '')}</div></td>
+                  <td>${esc(c.contract_number || '-')}</td>
+                  <td>${esc(p9cContractType(c))}</td>
+                  <td>${fmtDate(c.start_date)}</td>
+                  <td>${fmtDate(c.end_date)} ${n !== null && n >= 0 && n <= 30 ? p9cReminderBadge(c) : ''}</td>
+                  <td>${contractStatusBadge(c.status)}</td>
+                  <td><div class="row-actions"><button class="btn btn-light btn-sm" onclick="contractForm('${esc(c.id)}')">Edit</button>${c.document_path ? `<button class="btn btn-light btn-sm" onclick="contractOpenDocument('${esc(c.document_path)}')">Dokumen</button>` : ''}</div></td>
+                </tr>`;
+              }).join('')}</tbody>
+            </table>
+          </div>
+        </div>
+      ` : '<div class="card empty">Belum ada kontrak.</div>'}
+    </div>`;
+}
