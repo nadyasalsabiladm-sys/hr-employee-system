@@ -1056,13 +1056,37 @@ window.employeeEditForm = (id) => {
   refresh();
 };
 
-window.showEmployeeDetail = id => {
+window.showEmployeeDetail = async id => {
   const e = state.employees.find(x => x.id === id);
   if (!e) { toast('Data karyawan tidak ditemukan.', 'error'); return; }
   const old = $('#detailModal'); if (old) old.remove();
   const rows = state.assignments.filter(a => a.employee_id === id)
     .sort((a, b) => String(b.start_date).localeCompare(String(a.start_date)));
+  let docs = [];
+  try {
+    const q = await sb.from('employee_documents_status_view')
+      .select('*')
+      .eq('employee_id', id)
+      .order('created_at', { ascending: false });
+    if (q.error) throw q.error;
+    docs = q.data || [];
+  } catch (err) {
+    toast('Dokumen karyawan belum dapat dimuat: ' + friendlyError(err), 'error');
+  }
   const item = (label, val) => `<div class="detail-item"><div class="muted">${label}</div><div>${esc(val || '-')}</div></div>`;
+  const documentRows = docs.length ? docs.map(d => `
+    <tr>
+      <td>${esc(phase10DocCategoryLabel(d.document_category))}</td>
+      <td><b>${esc(d.document_type || '-')}</b><div class="muted">${esc(d.document_number || '')}</div></td>
+      <td>${d.document_date ? fmtDate(d.document_date) : '-'}</td>
+      <td>${d.valid_until ? fmtDate(d.valid_until) : 'Tidak dibatasi'}${d.remaining_days != null ? `<div class="muted">${esc(d.remaining_days)} hari lagi</div>` : ''}</td>
+      <td>${phase10DocStatusBadge(d.document_status)}</td>
+      <td><div class="row-actions">
+        ${d.file_path ? `<button class="btn btn-light btn-sm" onclick="phase10OpenDocument('${esc(d.file_path)}')">Buka</button>` : ''}
+        <button class="btn btn-light btn-sm" onclick="phase10DocumentForm('${esc(d.id)}')">Edit</button>
+        <button class="btn btn-light btn-sm" onclick="phase10DeleteDocument('${esc(d.id)}','${esc(d.file_path || '')}')">Hapus</button>
+      </div></td>
+    </tr>`).join('') : '';
   const modal = document.createElement('div');
   modal.className = 'modal-backdrop'; modal.id = 'detailModal';
   modal.innerHTML = `<div class="modal modal-wide">
@@ -1074,6 +1098,13 @@ window.showEmployeeDetail = id => {
       ${item('Departemen', e.departments?.name)}${item('Jabatan', e.positions?.name)}${item('Status', e.employment_status === 'active' ? 'Aktif' : e.employment_status === 'inactive' ? 'Tidak Aktif' : e.employment_status)}
       ${item('Tipe Karyawan', EMP_TYPE[e.employment_type] || e.employment_type)}${item('Tanggal Masuk', e.join_date ? fmtDate(e.join_date) : '')}${item('Lokasi Saat Ini', currentOutletName(id))}
     </div>
+
+    <div class="section-head" style="margin-top:22px">
+      <div><h3 class="sub-title" style="margin:0">Dokumen Karyawan (${docs.length})</h3><div class="muted">Seluruh dokumen HR yang terhubung dengan karyawan ini.</div></div>
+      <button type="button" class="btn btn-primary" onclick="phase10DocumentForm('', '${esc(id)}')">+ Upload Dokumen</button>
+    </div>
+    ${docs.length ? `<div class="table-wrap"><table class="table"><thead><tr><th>Kategori</th><th>Jenis / Nomor</th><th>Tanggal</th><th>Berlaku Sampai</th><th>Status</th><th>Aksi</th></tr></thead><tbody>${documentRows}</tbody></table></div>` : '<div class="card empty">Belum ada dokumen untuk karyawan ini.</div>'}
+
     <div class="section-head" style="margin-top:22px"><h3 class="sub-title" style="margin:0">Riwayat Penempatan</h3><button type="button" class="btn btn-primary" onclick="assignmentForm('${esc(id)}')">+ Tambah Penempatan</button></div>
     ${rows.length ? `<div class="table-wrap"><table class="table"><thead><tr><th>Outlet / Lokasi Kerja</th><th>Mulai</th><th>Selesai</th><th>Status</th><th>Catatan</th><th>Aksi</th></tr></thead><tbody>${rows.map(a => { const st = assignmentStatus(a); return `<tr><td><b>${esc(assignmentOutlet(a))}</b></td><td>${fmtDate(a.start_date)}</td><td>${fmtDate(a.end_date)}</td><td><span class="badge ${st.cls}">${st.label}</span></td><td>${esc(a.notes || '-')}</td><td><button class="btn btn-light btn-sm" onclick="assignmentForm('${esc(id)}','${esc(a.id)}')">Edit</button></td></tr>`; }).join('')}</tbody></table></div>` : '<div class="card empty">Belum ada riwayat penempatan.</div>'}
   </div>`;
@@ -5836,14 +5867,15 @@ async function phase10DeleteDocument(id, path) {
 }
 window.phase10DeleteDocument = phase10DeleteDocument;
 
-function phase10DocumentForm(id = '') {
+function phase10DocumentForm(id = '', presetEmployeeId = '') {
   const existing = id ? (state.employeeDocuments || []).find(x => x.id === id) : null;
   const employees = state.employees || [];
+  const selectedEmployeeId = existing?.employee_id || presetEmployeeId || '';
   const selectedCategory = existing?.document_category || 'IDENTITAS';
   const selectedTypes = PHASE10_DOC_TYPES[selectedCategory] || PHASE10_DOC_TYPES.IDENTITAS;
 
   const employeeOpts = employees.map(e =>
-    `<option value="${esc(e.id)}" ${existing?.employee_id === e.id ? 'selected' : ''}>${esc(e.full_name)} — ${esc(e.employee_number || '')}</option>`
+    `<option value="${esc(e.id)}" ${selectedEmployeeId === e.id ? 'selected' : ''}>${esc(e.full_name)} — ${esc(e.employee_number || '')}</option>`
   ).join('');
 
   const categoryOpts = PHASE10_DOC_CATEGORIES.map(([v,l]) =>
