@@ -5747,195 +5747,397 @@ renderApp = function() {
 console.log('Phase 7 — Employee Self Profile + HR Verification loaded.');
 
 /* =====================================================================
-   PHASE 9C — PENGINGAT KONTRAK 30 / 14 / 7 HARI
-   Menimpa tampilan contracts() tanpa menghapus modul sebelumnya.
-   Tidak membutuhkan SQL tambahan; memakai data state.contracts.
+   PHASE 10B — DOKUMEN KARYAWAN
+   Tambahan ini sengaja APPEND ke file FULL sebelumnya.
+   Tidak menghapus / mengganti modul Phase 6–9.
    ===================================================================== */
 
-function p9cDaysRemaining(c) {
-  if (!c?.end_date) return null;
-  return daysUntil(c.end_date);
+state.employeeDocuments = state.employeeDocuments || [];
+state.documentF = state.documentF || { q: '', employee: '', category: '', status: '' };
+
+const PHASE10_DOC_CATEGORIES = [
+  ['IDENTITAS', 'Identitas'],
+  ['PENDIDIKAN', 'Pendidikan'],
+  ['KONTRAK', 'Kontrak'],
+  ['HR', 'HR / Kepegawaian'],
+  ['BPJS', 'BPJS'],
+  ['LAINNYA', 'Lainnya']
+];
+
+const PHASE10_DOC_TYPES = {
+  IDENTITAS: ['KTP', 'KK', 'NPWP', 'SIM', 'Paspor', 'Dokumen Identitas Lainnya'],
+  PENDIDIKAN: ['Ijazah', 'Transkrip Nilai', 'Sertifikat', 'Dokumen Pendidikan Lainnya'],
+  KONTRAK: ['Offering Letter', 'PKWT', 'PKWTT', 'Perpanjangan Kontrak', 'Amandemen Kontrak'],
+  HR: ['Surat Keterangan', 'Surat Pengangkatan', 'Surat Mutasi', 'Surat Teguran / SP', 'Surat Peringatan', 'Dokumen HR Lainnya'],
+  BPJS: ['BPJS Kesehatan', 'BPJS Ketenagakerjaan', 'Dokumen BPJS Lainnya'],
+  LAINNYA: ['Dokumen Pendukung', 'Dokumen Lainnya']
+};
+
+function phase10DocCategoryLabel(v) {
+  return PHASE10_DOC_CATEGORIES.find(x => x[0] === v)?.[1] || v || '-';
 }
 
-function p9cReminderLevel(c) {
-  const n = p9cDaysRemaining(c);
-  if (n === null) return null;
-  if (n < 0) return 'expired';
-  if (n <= 7) return '7';
-  if (n <= 14) return '14';
-  if (n <= 30) return '30';
-  return null;
+function phase10DocStatusBadge(status) {
+  const map = {
+    valid: ['badge-green', 'Berlaku'],
+    expiring_90_days: ['badge-blue', '≤ 90 hari'],
+    expiring_30_days: ['badge-yellow', '≤ 30 hari'],
+    expired: ['badge-red', 'Kadaluarsa']
+  };
+  const [cl, label] = map[status] || ['badge-blue', status || 'Berlaku'];
+  return `<span class="badge ${cl}">${esc(label)}</span>`;
 }
 
-function p9cReminderBadge(c) {
-  const n = p9cDaysRemaining(c);
-  if (n === null) return '';
-  if (n < 0) return '<span class="badge badge-red">Sudah berakhir</span>';
-  if (n <= 7) return `<span class="badge badge-red">${n} hari lagi</span>`;
-  if (n <= 14) return `<span class="badge badge-yellow">${n} hari lagi</span>`;
-  if (n <= 30) return `<span class="badge badge-yellow">${n} hari lagi</span>`;
-  return `<span class="badge badge-green">${n} hari lagi</span>`;
+async function phase10LoadDocuments() {
+  const { data, error } = await sb.from('employee_documents_status_view')
+    .select('*')
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  state.employeeDocuments = data || [];
+  return state.employeeDocuments;
 }
 
-function p9cContractType(c) {
-  if (typeof cgTypeLabel === 'function') return cgTypeLabel(c?.contract_type);
-  if (typeof contractTypeLabel === 'function') return contractTypeLabel(c?.contract_type);
-  return c?.contract_type || '-';
+function phase10DocPath(employeeId, file) {
+  const safe = String(file.name || 'dokumen')
+    .replace(/[^a-zA-Z0-9._-]+/g, '_');
+  const year = new Date().getFullYear();
+  return `employees/${employeeId}/documents/${year}/${Date.now()}-${safe}`;
 }
 
-function p9cEmployee(c) {
-  return state.employees.find(e => e.id === c.employee_id) || null;
+async function phase10OpenDocument(path) {
+  if (!path) return toast('File dokumen belum tersedia.', 'error');
+  const { data, error } = await sb.storage.from('hr-documents').createSignedUrl(path, 600);
+  if (error || !data?.signedUrl) {
+    toast('Dokumen tidak dapat dibuka. Periksa policy Storage hr-documents.', 'error');
+    return;
+  }
+  window.open(data.signedUrl, '_blank', 'noopener');
 }
+window.phase10OpenDocument = phase10OpenDocument;
 
-function p9cOpenEmployeeContract(id) {
-  const c = state.contracts.find(x => x.id === id);
-  if (!c) return;
-  contractForm(id);
+async function phase10DeleteDocument(id, path) {
+  if (!isAdminUser() && !isHRUser()) {
+    toast('Anda tidak punya izin menghapus dokumen.', 'error');
+    return;
+  }
+  if (!confirm('Hapus dokumen ini? File dan data dokumen akan dihapus.')) return;
+
+  const delRow = await sb.from('employee_documents').delete().eq('id', id);
+  if (delRow.error) return toast(friendlyError(delRow.error), 'error');
+
+  if (path) {
+    const delFile = await sb.storage.from('hr-documents').remove([path]);
+    if (delFile.error) toast('Data dokumen terhapus, tetapi file Storage gagal dihapus.', 'error');
+  }
+
+  toast('Dokumen berhasil dihapus.');
+  await phase10LoadDocuments();
+  phase10Documents();
 }
+window.phase10DeleteDocument = phase10DeleteDocument;
 
-function contracts() {
-  const rows = state.contracts || [];
-  const today = todayJakarta();
-  const active = rows.filter(c => c.status === 'active');
-  const expired = rows.filter(c => c.end_date && c.end_date < today);
-  const exp30 = rows.filter(c => c.status === 'active' && p9cDaysRemaining(c) !== null && p9cDaysRemaining(c) >= 0 && p9cDaysRemaining(c) <= 30);
-  const exp14 = rows.filter(c => c.status === 'active' && p9cDaysRemaining(c) !== null && p9cDaysRemaining(c) >= 0 && p9cDaysRemaining(c) <= 14);
-  const exp7 = rows.filter(c => c.status === 'active' && p9cDaysRemaining(c) !== null && p9cDaysRemaining(c) >= 0 && p9cDaysRemaining(c) <= 7);
-  const drafts = rows.filter(c => c.status === 'draft');
+function phase10DocumentForm(id = '') {
+  const existing = id ? (state.employeeDocuments || []).find(x => x.id === id) : null;
+  const employees = state.employees || [];
+  const selectedCategory = existing?.document_category || 'IDENTITAS';
+  const selectedTypes = PHASE10_DOC_TYPES[selectedCategory] || PHASE10_DOC_TYPES.IDENTITAS;
 
-  const reminderRows = rows
-    .filter(c => c.status === 'active' && p9cDaysRemaining(c) !== null && p9cDaysRemaining(c) >= 0 && p9cDaysRemaining(c) <= 30)
-    .sort((a,b) => p9cDaysRemaining(a) - p9cDaysRemaining(b));
+  const employeeOpts = employees.map(e =>
+    `<option value="${esc(e.id)}" ${existing?.employee_id === e.id ? 'selected' : ''}>${esc(e.full_name)} — ${esc(e.employee_number || '')}</option>`
+  ).join('');
 
-  const expiredRows = rows
-    .filter(c => c.end_date && c.end_date < today && c.status !== 'cancelled')
-    .sort((a,b) => String(b.end_date).localeCompare(String(a.end_date)));
+  const categoryOpts = PHASE10_DOC_CATEGORIES.map(([v,l]) =>
+    `<option value="${esc(v)}" ${selectedCategory === v ? 'selected' : ''}>${esc(l)}</option>`
+  ).join('');
+
+  const typeOpts = selectedTypes.map(v =>
+    `<option value="${esc(v)}" ${existing?.document_type === v ? 'selected' : ''}>${esc(v)}</option>`
+  ).join('');
+
+  document.body.insertAdjacentHTML('beforeend', `
+    <div class="modal-backdrop" id="phase10DocModal">
+      <div class="modal" style="max-width:760px;max-height:90vh;overflow:auto">
+        <div class="modal-head">
+          <h3>${existing ? 'Edit Dokumen Karyawan' : 'Upload Dokumen Karyawan'}</h3>
+          <button class="btn btn-light" onclick="phase10CloseModal()">Tutup</button>
+        </div>
+        <form id="phase10DocForm" class="modal-grid">
+          <div class="field field-full">
+            <label>Karyawan *</label>
+            <select id="p10Employee" required ${existing ? 'disabled' : ''}>
+              <option value="">Pilih karyawan</option>${employeeOpts}
+            </select>
+          </div>
+
+          <div class="field">
+            <label>Kategori *</label>
+            <select id="p10Category" required>${categoryOpts}</select>
+          </div>
+
+          <div class="field">
+            <label>Jenis Dokumen *</label>
+            <select id="p10Type" required>${typeOpts}</select>
+          </div>
+
+          <div class="field">
+            <label>Nomor Dokumen</label>
+            <input id="p10Number" value="${esc(existing?.document_number || '')}" placeholder="Nomor dokumen">
+          </div>
+
+          <div class="field">
+            <label>Tanggal Dokumen</label>
+            <input id="p10Date" type="date" value="${esc(existing?.document_date || '')}">
+          </div>
+
+          <div class="field">
+            <label>Berlaku Mulai</label>
+            <input id="p10ValidFrom" type="date" value="${esc(existing?.valid_from || '')}">
+          </div>
+
+          <div class="field">
+            <label>Berlaku Sampai</label>
+            <input id="p10ValidUntil" type="date" value="${esc(existing?.valid_until || '')}">
+          </div>
+
+          <div class="field field-full">
+            <label>File Dokumen ${existing ? '(kosongkan jika tidak diganti)' : '*'}</label>
+            <input id="p10File" type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx">
+            ${existing?.original_file_name ? `<div class="muted" style="margin-top:6px">File saat ini: ${esc(existing.original_file_name)}</div>` : ''}
+          </div>
+
+          <div class="field field-full">
+            <label>Catatan HR</label>
+            <textarea id="p10Notes" rows="4" placeholder="Catatan tambahan HR...">${esc(existing?.notes || '')}</textarea>
+          </div>
+
+          <div class="field field-full" style="display:flex;justify-content:flex-end;gap:8px">
+            <button type="button" class="btn btn-light" onclick="phase10CloseModal()">Batal</button>
+            <button type="submit" class="btn btn-primary">${existing ? 'Simpan Perubahan' : 'Upload & Simpan'}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  `);
+
+  $('#p10Category').onchange = () => {
+    const types = PHASE10_DOC_TYPES[$('#p10Category').value] || [];
+    $('#p10Type').innerHTML = types.map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join('');
+  };
+
+  $('#phase10DocForm').onsubmit = async e => {
+    e.preventDefault();
+    const employeeId = existing?.employee_id || $('#p10Employee').value;
+    const file = $('#p10File').files?.[0] || null;
+
+    if (!employeeId) return toast('Pilih karyawan.', 'error');
+    if (!existing && !file) return toast('Pilih file dokumen.', 'error');
+
+    const saveBtn = $('#phase10DocForm button[type="submit"]');
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Menyimpan...';
+
+    try {
+      let path = existing?.file_path || null;
+      let originalName = existing?.original_file_name || null;
+      let mimeType = existing?.mime_type || null;
+      let fileSize = existing?.file_size || null;
+
+      if (file) {
+        path = phase10DocPath(employeeId, file);
+        const up = await sb.storage.from('hr-documents').upload(path, file, {
+          upsert: false,
+          contentType: file.type || 'application/octet-stream'
+        });
+        if (up.error) throw up.error;
+        originalName = file.name;
+        mimeType = file.type || null;
+        fileSize = file.size || null;
+      }
+
+      const payload = {
+        employee_id: employeeId,
+        document_category: $('#p10Category').value,
+        document_type: $('#p10Type').value,
+        document_number: $('#p10Number').value.trim() || null,
+        document_date: $('#p10Date').value || null,
+        valid_from: $('#p10ValidFrom').value || null,
+        valid_until: $('#p10ValidUntil').value || null,
+        file_path: path,
+        original_file_name: originalName,
+        mime_type: mimeType,
+        file_size: fileSize,
+        notes: $('#p10Notes').value.trim() || null,
+        uploaded_by: state.profile?.id || state.session?.user?.id || null
+      };
+
+      const result = existing
+        ? await sb.from('employee_documents').update(payload).eq('id', existing.id)
+        : await sb.from('employee_documents').insert(payload);
+
+      if (result.error) {
+        if (file && path && !existing) await sb.storage.from('hr-documents').remove([path]);
+        throw result.error;
+      }
+
+      toast(existing ? 'Dokumen berhasil diperbarui.' : 'Dokumen berhasil diupload.');
+      phase10CloseModal();
+      await phase10LoadDocuments();
+      phase10Documents();
+    } catch (err) {
+      toast(friendlyError(err), 'error');
+    } finally {
+      if ($('#phase10DocForm')) saveBtn.disabled = false;
+    }
+  };
+}
+window.phase10DocumentForm = phase10DocumentForm;
+
+function phase10CloseModal() {
+  $('#phase10DocModal')?.remove();
+}
+window.phase10CloseModal = phase10CloseModal;
+
+function phase10Documents() {
+  const f = state.documentF;
+  const all = state.employeeDocuments || [];
+  const q = String(f.q || '').toLowerCase();
+
+  const rows = all.filter(d => {
+    const employee = state.employees.find(e => e.id === d.employee_id);
+    const hay = [
+      d.full_name, d.employee_number, d.document_type, d.document_category,
+      d.document_number, d.original_file_name
+    ].map(x => String(x || '').toLowerCase()).join(' ');
+    if (q && !hay.includes(q)) return false;
+    if (f.employee && d.employee_id !== f.employee) return false;
+    if (f.category && d.document_category !== f.category) return false;
+    if (f.status && d.document_status !== f.status) return false;
+    return !!employee;
+  });
+
+  const expired = all.filter(x => x.document_status === 'expired').length;
+  const exp30 = all.filter(x => x.document_status === 'expiring_30_days').length;
+  const exp90 = all.filter(x => x.document_status === 'expiring_90_days').length;
 
   $('#content').innerHTML = `
     <div class="section">
       <div class="section-head">
         <div>
-          <h2>Daftar Kontrak</h2>
-          <div class="muted">${rows.length} dokumen kontrak tersimpan</div>
+          <h2>Dokumen Karyawan</h2>
+          <div class="muted">Pusat dokumen HR per karyawan</div>
         </div>
         <div class="row-actions">
-          <button class="btn btn-light" onclick="importContractDocument()">📄 Import Dokumen</button>
-          <button class="btn btn-primary" onclick="cgOpenGenerator()">📝 Buat Kontrak</button>
-          <button class="btn btn-light" onclick="contractForm()">+ Tambah Kontrak</button>
+          <button class="btn btn-primary" onclick="phase10DocumentForm()">+ Upload Dokumen</button>
         </div>
       </div>
 
       <div class="cards" style="margin-bottom:14px">
-        <div class="card"><div class="muted">Aktif</div><div class="metric">${active.length}</div></div>
-        <div class="card"><div class="muted">Berakhir ≤ 30 Hari</div><div class="metric">${exp30.length}</div></div>
-        <div class="card"><div class="muted">Berakhir ≤ 14 Hari</div><div class="metric">${exp14.length}</div></div>
-        <div class="card"><div class="muted">Berakhir ≤ 7 Hari</div><div class="metric">${exp7.length}</div></div>
-        <div class="card"><div class="muted">Sudah Berakhir</div><div class="metric">${expired.length}</div></div>
-        <div class="card"><div class="muted">Draft</div><div class="metric">${drafts.length}</div></div>
+        <div class="card"><div class="muted">Total Dokumen</div><div class="metric">${all.length}</div></div>
+        <div class="card"><div class="muted">Berlaku</div><div class="metric">${all.filter(x => x.document_status === 'valid').length}</div></div>
+        <div class="card"><div class="muted">≤ 30 Hari</div><div class="metric">${exp30}</div></div>
+        <div class="card"><div class="muted">≤ 90 Hari</div><div class="metric">${exp90}</div></div>
+        <div class="card"><div class="muted">Kadaluarsa</div><div class="metric">${expired}</div></div>
       </div>
 
-      ${reminderRows.length ? `
-        <div class="card" style="margin-top:14px;border-left:4px solid #f59e0b">
-          <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start">
-            <div>
-              <b>🔔 Notifikasi HR</b>
-              <div class="muted" style="margin-top:4px">Ada ${reminderRows.length} kontrak yang perlu diperhatikan.</div>
-            </div>
-            <span class="badge badge-yellow">Perlu Tindakan</span>
-          </div>
-        </div>
-
-        <div class="section" style="margin-top:14px">
-          <div class="section-head">
-            <div>
-              <h2>🔔 Pengingat Kontrak</h2>
-              <div class="muted">Kontrak aktif yang akan berakhir dalam 30 hari atau kurang.</div>
-            </div>
-          </div>
-          <div class="table-wrap">
-            <table class="table">
-              <thead><tr><th>Karyawan</th><th>Jenis</th><th>No. Dokumen</th><th>Tanggal Berakhir</th><th>Sisa</th><th>Aksi</th></tr></thead>
-              <tbody>${reminderRows.map(c => {
-                const e = p9cEmployee(c);
-                return `<tr>
-                  <td><b>${esc(e?.full_name || '-')}</b><div class="muted">${esc(e?.employee_number || '')}</div></td>
-                  <td>${esc(p9cContractType(c))}</td>
-                  <td>${esc(c.contract_number || '-')}</td>
-                  <td>${fmtDate(c.end_date)}</td>
-                  <td>${p9cReminderBadge(c)}</td>
-                  <td><button class="btn btn-light btn-sm" onclick="p9cOpenEmployeeContract('${esc(c.id)}')">Lihat Kontrak</button></td>
-                </tr>`;
-              }).join('')}</tbody>
-            </table>
-          </div>
-        </div>
-      ` : `
-        <div class="card" style="margin-top:14px">
-          <b>🔔 Notifikasi HR: tidak ada pengingat aktif.</b>
-          <div class="muted" style="margin-top:4px">Tidak ada kontrak aktif yang akan berakhir dalam 30 hari. PKWTT tanpa tanggal berakhir tidak masuk pengingat.</div>
-        </div>
-      `}
-
-      ${expiredRows.length ? `
-        <div class="section" style="margin-top:14px">
-          <div class="section-head"><div><h2>🔴 Kontrak Sudah Berakhir</h2><div class="muted">Perlu ditindaklanjuti oleh HR.</div></div></div>
-          <div class="table-wrap">
-            <table class="table">
-              <thead><tr><th>Karyawan</th><th>Jenis</th><th>No. Dokumen</th><th>Berakhir</th><th>Status</th><th>Aksi</th></tr></thead>
-              <tbody>${expiredRows.map(c => {
-                const e = p9cEmployee(c);
-                return `<tr>
-                  <td><b>${esc(e?.full_name || '-')}</b><div class="muted">${esc(e?.employee_number || '')}</div></td>
-                  <td>${esc(p9cContractType(c))}</td>
-                  <td>${esc(c.contract_number || '-')}</td>
-                  <td>${fmtDate(c.end_date)} ${p9cReminderBadge(c)}</td>
-                  <td>${contractStatusBadge(c.status)}</td>
-                  <td><button class="btn btn-light btn-sm" onclick="p9cOpenEmployeeContract('${esc(c.id)}')">Lihat Kontrak</button></td>
-                </tr>`;
-              }).join('')}</tbody>
-            </table>
-          </div>
-        </div>
-      ` : ''}
+      <div class="toolbar">
+        <input id="p10Search" placeholder="Cari nama / ID / jenis / nomor dokumen..." value="${esc(f.q)}">
+        <select id="p10EmployeeFilter">
+          <option value="">Semua karyawan</option>
+          ${state.employees.map(e => `<option value="${esc(e.id)}" ${f.employee === e.id ? 'selected' : ''}>${esc(e.full_name)} — ${esc(e.employee_number || '')}</option>`).join('')}
+        </select>
+        <select id="p10CategoryFilter">
+          <option value="">Semua kategori</option>
+          ${PHASE10_DOC_CATEGORIES.map(([v,l]) => `<option value="${esc(v)}" ${f.category === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}
+        </select>
+        <select id="p10StatusFilter">
+          <option value="">Semua status</option>
+          <option value="valid" ${f.status === 'valid' ? 'selected' : ''}>Berlaku</option>
+          <option value="expiring_90_days" ${f.status === 'expiring_90_days' ? 'selected' : ''}>≤ 90 hari</option>
+          <option value="expiring_30_days" ${f.status === 'expiring_30_days' ? 'selected' : ''}>≤ 30 hari</option>
+          <option value="expired" ${f.status === 'expired' ? 'selected' : ''}>Kadaluarsa</option>
+        </select>
+      </div>
 
       ${rows.length ? `
-        <div class="section" style="margin-top:14px">
-          <div class="section-head"><div><h2>Semua Kontrak</h2></div></div>
-          <div class="table-wrap">
-            <table class="table">
-              <thead><tr><th>Karyawan</th><th>No. Dokumen</th><th>Jenis</th><th>Mulai</th><th>Berakhir</th><th>Status</th><th>Aksi</th></tr></thead>
-              <tbody>${rows.map(c => {
-                const e = p9cEmployee(c);
-                const n = p9cDaysRemaining(c);
-                return `<tr>
-                  <td><b>${esc(e?.full_name || '-')}</b><div class="muted">${esc(e?.employee_number || '')}</div></td>
-                  <td>${esc(c.contract_number || '-')}</td>
-                  <td>${esc(p9cContractType(c))}</td>
-                  <td>${fmtDate(c.start_date)}</td>
-                  <td>${fmtDate(c.end_date)} ${n !== null && n >= 0 && n <= 30 ? p9cReminderBadge(c) : ''}</td>
-                  <td>${contractStatusBadge(c.status)}</td>
-                  <td><div class="row-actions"><button class="btn btn-light btn-sm" onclick="contractForm('${esc(c.id)}')">Edit</button>${c.document_path ? `<button class="btn btn-light btn-sm" onclick="contractOpenDocument('${esc(c.document_path)}')">Dokumen</button>` : ''}</div></td>
-                </tr>`;
-              }).join('')}</tbody>
-            </table>
-          </div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr>
+              <th>Karyawan</th><th>Kategori</th><th>Jenis Dokumen</th><th>No. Dokumen</th>
+              <th>Tanggal</th><th>Berlaku Sampai</th><th>Status</th><th>Aksi</th>
+            </tr></thead>
+            <tbody>
+              ${rows.map(d => `
+                <tr>
+                  <td><b>${esc(d.full_name || '-')}</b><div class="muted">${esc(d.employee_number || '-')}</div></td>
+                  <td>${esc(phase10DocCategoryLabel(d.document_category))}</td>
+                  <td>${esc(d.document_type || '-')}</td>
+                  <td>${esc(d.document_number || '-')}</td>
+                  <td>${fmtDate(d.document_date)}</td>
+                  <td>
+                    ${fmtDate(d.valid_until)}
+                    ${d.remaining_days !== null && d.remaining_days !== undefined
+                      ? `<div class="muted">${d.remaining_days < 0 ? 'Lewat ' + Math.abs(d.remaining_days) + ' hari' : d.remaining_days + ' hari lagi'}</div>`
+                      : ''}
+                  </td>
+                  <td>${phase10DocStatusBadge(d.document_status)}</td>
+                  <td><div class="row-actions">
+                    ${d.file_path ? `<button class="btn btn-light btn-sm" onclick="phase10OpenDocument('${esc(d.file_path)}')">Buka</button>` : ''}
+                    <button class="btn btn-light btn-sm" onclick="phase10DocumentForm('${esc(d.id)}')">Edit</button>
+                    <button class="btn btn-light btn-sm" onclick="phase10DeleteDocument('${esc(d.id)}','${esc(d.file_path || '')}')">Hapus</button>
+                  </div></td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
         </div>
-      ` : '<div class="card empty">Belum ada kontrak.</div>'}
-    </div>`;
+      ` : `<div class="card empty">Belum ada dokumen yang sesuai filter.</div>`}
+    </div>
+  `;
+
+  $('#p10Search').oninput = e => { f.q = e.target.value; phase10Documents(); };
+  $('#p10EmployeeFilter').onchange = e => { f.employee = e.target.value; phase10Documents(); };
+  $('#p10CategoryFilter').onchange = e => { f.category = e.target.value; phase10Documents(); };
+  $('#p10StatusFilter').onchange = e => { f.status = e.target.value; phase10Documents(); };
 }
 
+const __phase10OriginalTitle = title;
+title = function() {
+  if (state.view === 'employee_documents') return 'Dokumen Karyawan';
+  return __phase10OriginalTitle();
+};
 
-/* =====================================================================
-   PHASE 9D — NOTIFIKASI KONTRAK (IN-APP)
-   Alert otomatis berdasarkan tanggal berakhir kontrak.
-   Tidak mengirim email/WhatsApp; notifikasi tampil di aplikasi HR.
-   ===================================================================== */
-function p9dContractNotifications() {
-  const rows = state.contracts || [];
-  return rows.filter(c => {
-    const n = p9cDaysRemaining(c);
-    return c.status === 'active' && n !== null && n >= 0 && n <= 30;
-  }).sort((a,b) => p9cDaysRemaining(a) - p9cDaysRemaining(b));
-}
+const __phase10OriginalRenderView = renderView;
+renderView = function() {
+  if (state.view === 'employee_documents') return phase10Documents();
+  return __phase10OriginalRenderView();
+};
 
-console.log('HR Employee System Phase 9D loaded: Contract Notifications');
+const __phase10OriginalRenderApp = renderApp;
+renderApp = function() {
+  __phase10OriginalRenderApp();
+  const nav = document.querySelector('.sidebar .nav');
+  if (!nav || document.getElementById('phase10DocumentsNav')) return;
+  const b = document.createElement('button');
+  b.id = 'phase10DocumentsNav';
+  b.type = 'button';
+  b.textContent = 'Dokumen Karyawan';
+  b.dataset.view = 'employee_documents';
+  b.className = state.view === 'employee_documents' ? 'active' : '';
+  b.onclick = async () => {
+    state.view = 'employee_documents';
+    renderApp();
+    try {
+      await phase10LoadDocuments();
+      phase10Documents();
+    } catch (err) {
+      $('#content').innerHTML = `<div class="card"><div class="error">${esc(friendlyError(err))}</div></div>`;
+    }
+  };
+  const profileBtn = document.getElementById('phase7AdminNav');
+  const masterBtn = [...nav.querySelectorAll('button')].find(x => /Master Data/i.test(x.textContent || ''));
+  if (profileBtn) nav.insertBefore(b, profileBtn);
+  else if (masterBtn) nav.insertBefore(b, masterBtn);
+  else nav.appendChild(b);
+};
+
+console.log('Phase 10B — Employee Documents loaded.');
