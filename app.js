@@ -5835,6 +5835,16 @@ function contracts() {
       </div>
 
       ${reminderRows.length ? `
+        <div class="card" style="margin-top:14px;border-left:4px solid #f59e0b">
+          <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start">
+            <div>
+              <b>🔔 Notifikasi HR</b>
+              <div class="muted" style="margin-top:4px">Ada ${reminderRows.length} kontrak yang perlu diperhatikan.</div>
+            </div>
+            <span class="badge badge-yellow">Perlu Tindakan</span>
+          </div>
+        </div>
+
         <div class="section" style="margin-top:14px">
           <div class="section-head">
             <div>
@@ -5861,8 +5871,8 @@ function contracts() {
         </div>
       ` : `
         <div class="card" style="margin-top:14px">
-          <b>✅ Tidak ada kontrak yang akan berakhir dalam 30 hari.</b>
-          <div class="muted" style="margin-top:4px">PKWTT tanpa tanggal berakhir tidak masuk pengingat.</div>
+          <b>🔔 Notifikasi HR: tidak ada pengingat aktif.</b>
+          <div class="muted" style="margin-top:4px">Tidak ada kontrak aktif yang akan berakhir dalam 30 hari. PKWTT tanpa tanggal berakhir tidak masuk pengingat.</div>
         </div>
       `}
 
@@ -5913,3 +5923,19 @@ function contracts() {
       ` : '<div class="card empty">Belum ada kontrak.</div>'}
     </div>`;
 }
+
+
+/* =====================================================================
+   PHASE 9D — NOTIFIKASI KONTRAK (IN-APP)
+   Alert otomatis berdasarkan tanggal berakhir kontrak.
+   Tidak mengirim email/WhatsApp; notifikasi tampil di aplikasi HR.
+   ===================================================================== */
+function p9dContractNotifications() {
+  const rows = state.contracts || [];
+  return rows.filter(c => {
+    const n = p9cDaysRemaining(c);
+    return c.status === 'active' && n !== null && n >= 0 && n <= 30;
+  }).sort((a,b) => p9cDaysRemaining(a) - p9cDaysRemaining(b));
+}
+
+console.log('HR Employee System Phase 9D loaded: Contract Notifications');
