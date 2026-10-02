@@ -1056,37 +1056,13 @@ window.employeeEditForm = (id) => {
   refresh();
 };
 
-window.showEmployeeDetail = async id => {
+window.showEmployeeDetail = id => {
   const e = state.employees.find(x => x.id === id);
   if (!e) { toast('Data karyawan tidak ditemukan.', 'error'); return; }
   const old = $('#detailModal'); if (old) old.remove();
   const rows = state.assignments.filter(a => a.employee_id === id)
     .sort((a, b) => String(b.start_date).localeCompare(String(a.start_date)));
-  let docs = [];
-  try {
-    const q = await sb.from('employee_documents_status_view')
-      .select('*')
-      .eq('employee_id', id)
-      .order('created_at', { ascending: false });
-    if (q.error) throw q.error;
-    docs = q.data || [];
-  } catch (err) {
-    toast('Dokumen karyawan belum dapat dimuat: ' + friendlyError(err), 'error');
-  }
   const item = (label, val) => `<div class="detail-item"><div class="muted">${label}</div><div>${esc(val || '-')}</div></div>`;
-  const documentRows = docs.length ? docs.map(d => `
-    <tr>
-      <td>${esc(phase10DocCategoryLabel(d.document_category))}</td>
-      <td><b>${esc(d.document_type || '-')}</b><div class="muted">${esc(d.document_number || '')}</div></td>
-      <td>${d.document_date ? fmtDate(d.document_date) : '-'}</td>
-      <td>${d.valid_until ? fmtDate(d.valid_until) : 'Tidak dibatasi'}${d.remaining_days != null ? `<div class="muted">${esc(d.remaining_days)} hari lagi</div>` : ''}</td>
-      <td>${phase10DocStatusBadge(d.document_status)}</td>
-      <td><div class="row-actions">
-        ${d.file_path ? `<button class="btn btn-light btn-sm" onclick="phase10OpenDocument('${esc(d.file_path)}')">Buka</button>` : ''}
-        <button class="btn btn-light btn-sm" onclick="phase10DocumentForm('${esc(d.id)}')">Edit</button>
-        <button class="btn btn-light btn-sm" onclick="phase10DeleteDocument('${esc(d.id)}','${esc(d.file_path || '')}')">Hapus</button>
-      </div></td>
-    </tr>`).join('') : '';
   const modal = document.createElement('div');
   modal.className = 'modal-backdrop'; modal.id = 'detailModal';
   modal.innerHTML = `<div class="modal modal-wide">
@@ -1098,13 +1074,6 @@ window.showEmployeeDetail = async id => {
       ${item('Departemen', e.departments?.name)}${item('Jabatan', e.positions?.name)}${item('Status', e.employment_status === 'active' ? 'Aktif' : e.employment_status === 'inactive' ? 'Tidak Aktif' : e.employment_status)}
       ${item('Tipe Karyawan', EMP_TYPE[e.employment_type] || e.employment_type)}${item('Tanggal Masuk', e.join_date ? fmtDate(e.join_date) : '')}${item('Lokasi Saat Ini', currentOutletName(id))}
     </div>
-
-    <div class="section-head" style="margin-top:22px">
-      <div><h3 class="sub-title" style="margin:0">Dokumen Karyawan (${docs.length})</h3><div class="muted">Seluruh dokumen HR yang terhubung dengan karyawan ini.</div></div>
-      <button type="button" class="btn btn-primary" onclick="phase10DocumentForm('', '${esc(id)}')">+ Upload Dokumen</button>
-    </div>
-    ${docs.length ? `<div class="table-wrap"><table class="table"><thead><tr><th>Kategori</th><th>Jenis / Nomor</th><th>Tanggal</th><th>Berlaku Sampai</th><th>Status</th><th>Aksi</th></tr></thead><tbody>${documentRows}</tbody></table></div>` : '<div class="card empty">Belum ada dokumen untuk karyawan ini.</div>'}
-
     <div class="section-head" style="margin-top:22px"><h3 class="sub-title" style="margin:0">Riwayat Penempatan</h3><button type="button" class="btn btn-primary" onclick="assignmentForm('${esc(id)}')">+ Tambah Penempatan</button></div>
     ${rows.length ? `<div class="table-wrap"><table class="table"><thead><tr><th>Outlet / Lokasi Kerja</th><th>Mulai</th><th>Selesai</th><th>Status</th><th>Catatan</th><th>Aksi</th></tr></thead><tbody>${rows.map(a => { const st = assignmentStatus(a); return `<tr><td><b>${esc(assignmentOutlet(a))}</b></td><td>${fmtDate(a.start_date)}</td><td>${fmtDate(a.end_date)}</td><td><span class="badge ${st.cls}">${st.label}</span></td><td>${esc(a.notes || '-')}</td><td><button class="btn btn-light btn-sm" onclick="assignmentForm('${esc(id)}','${esc(a.id)}')">Edit</button></td></tr>`; }).join('')}</tbody></table></div>` : '<div class="card empty">Belum ada riwayat penempatan.</div>'}
   </div>`;
@@ -5867,15 +5836,14 @@ async function phase10DeleteDocument(id, path) {
 }
 window.phase10DeleteDocument = phase10DeleteDocument;
 
-function phase10DocumentForm(id = '', presetEmployeeId = '') {
+function phase10DocumentForm(id = '') {
   const existing = id ? (state.employeeDocuments || []).find(x => x.id === id) : null;
   const employees = state.employees || [];
-  const selectedEmployeeId = existing?.employee_id || presetEmployeeId || '';
   const selectedCategory = existing?.document_category || 'IDENTITAS';
   const selectedTypes = PHASE10_DOC_TYPES[selectedCategory] || PHASE10_DOC_TYPES.IDENTITAS;
 
   const employeeOpts = employees.map(e =>
-    `<option value="${esc(e.id)}" ${selectedEmployeeId === e.id ? 'selected' : ''}>${esc(e.full_name)} — ${esc(e.employee_number || '')}</option>`
+    `<option value="${esc(e.id)}" ${existing?.employee_id === e.id ? 'selected' : ''}>${esc(e.full_name)} — ${esc(e.employee_number || '')}</option>`
   ).join('');
 
   const categoryOpts = PHASE10_DOC_CATEGORIES.map(([v,l]) =>
@@ -6173,3 +6141,167 @@ renderApp = function() {
 };
 
 console.log('Phase 10B — Employee Documents loaded.');
+
+/* =========================================================
+   PHASE 8A — EMPLOYEE PORTAL ATTENDANCE
+   Portal Karyawan menggunakan PIN-session, bukan Supabase Auth.
+   Kamera + GPS hanya aktif saat tombol absensi ditekan.
+   ========================================================= */
+
+async function employeeAttendanceContext(){
+  return await empRpc('employee_attendance_context');
+}
+
+function employeeAttendanceStatusHtml(rec, tz){
+  if(!rec || !rec.check_in_at){
+    return `<div class="info-box">Anda belum melakukan absensi masuk hari ini.</div>`;
+  }
+  const inStatus = ATT_STATUS[rec.check_in_status]?.[0] || '-';
+  const out = rec.check_out_at
+    ? `Keluar: <b>${esc(fmtTime(rec.check_out_at, tz))}</b> · ${esc(ATT_STATUS[rec.check_out_status]?.[0] || '-')}<br>`
+    : `Keluar: <b>Belum absen</b><br>`;
+  return `<div class="info-box">Masuk: <b>${esc(fmtTime(rec.check_in_at, tz))}</b> · ${esc(inStatus)}<br>${out}<span class="muted">${esc(rec.work_location_name || '-')}</span></div>`;
+}
+
+async function employeeAttendancePanel(box){
+  box.innerHTML = '<div class="card empty">Memuat data absensi...</div>';
+  try{
+    const c = await employeeAttendanceContext();
+    if(!c || !c.employee_id){
+      box.innerHTML = '<div class="card"><div class="error">Data absensi karyawan tidak tersedia.</div></div>';
+      return;
+    }
+    const t = c.target || {};
+    const rec = c.record;
+    const action = attAction(c);
+    const actionLabel = action === 'check_in' ? 'ABSEN MASUK' : action === 'check_out' ? 'ABSEN KELUAR' : 'ABSENSI SELESAI';
+    const disabled = !action || !t.configured;
+    box.innerHTML = `<div class="section">
+      <div class="section-head"><h2>Absensi Hari Ini</h2></div>
+      <div class="cards">
+        <div class="card"><div class="muted">Nama</div><div class="metric" style="font-size:22px">${esc(empPortal.employee?.full_name||'-')}</div><div class="muted">ID ${esc(empPortal.employee?.employee_number||'-')}</div></div>
+        <div class="card"><div class="muted">Lokasi</div><div class="metric" style="font-size:20px">${esc(t.name||'-')}</div><div class="muted">${esc(t.kind === 'company' ? 'Lokasi kerja' : 'Outlet')}</div></div>
+      </div>
+      ${employeeAttendanceStatusHtml(rec, c.timezone || 'Asia/Jakarta')}
+      ${!t.configured ? `<div class="card"><div class="error">${esc(t.message || 'Lokasi kerja belum dikonfigurasi.')}</div></div>` : ''}
+      <button id="employeeAttButton" class="btn btn-primary btn-lg btn-block" ${disabled?'disabled':''}>${actionLabel}</button>
+      <div class="muted" style="margin-top:10px">Absensi membutuhkan kamera selfie dan lokasi perangkat. GPS tidak dilacak terus-menerus.</div>
+    </div>`;
+    if(!disabled) $('#employeeAttButton').onclick = () => openEmployeeAttendanceFlow(c, action);
+  }catch(err){
+    box.innerHTML = `<div class="card"><div class="error">${esc(friendlyError(err))}</div></div>`;
+  }
+}
+
+function openEmployeeAttendanceFlow(c, action){
+  const t = c.target || {};
+  const isIn = action === 'check_in';
+  const label = isIn ? 'ABSEN MASUK' : 'ABSEN KELUAR';
+  const flow = { action, stream:null, blob:null, previewUrl:null, accepted:false, camMsg:'Meminta akses kamera...', camErr:null, geo:null, geoErr:null, geoBusy:false, busy:false };
+  const modal = document.createElement('div');
+  modal.className = 'modal-backdrop att-backdrop';
+  modal.id = 'employeeAttModal';
+  modal.innerHTML = `<div class="modal att-modal">
+    <div class="section-head"><h2>${label}</h2><button type="button" class="btn btn-light" id="eAttClose">Tutup</button></div>
+    <div class="att-camera"><video id="eAttVideo" autoplay playsinline muted></video><img id="eAttPhoto" alt="Hasil selfie" hidden><div id="eAttCamMsg" class="att-cam-msg"></div></div>
+    <div class="att-shots"><button type="button" class="btn btn-primary btn-lg" id="eAttShoot" disabled>AMBIL SELFIE</button><button type="button" class="btn btn-light btn-lg" id="eAttRetake" hidden>Ambil Ulang</button><button type="button" class="btn btn-primary btn-lg" id="eAttUse" hidden>Gunakan Foto</button></div>
+    <div class="att-rows">
+      <div class="att-row"><span>GPS</span><b id="eAttGpsTxt">Mendapatkan lokasi...</b></div>
+      <div class="att-row"><span>Akurasi</span><b id="eAttAccTxt">-- meter</b></div>
+      <div class="att-row"><span>${t.kind === 'company' ? 'Lokasi kerja' : 'Outlet'}</span><b>${esc(t.name || '-')}</b></div>
+      <div class="att-row"><span>Jarak</span><b id="eAttDistTxt">--</b></div>
+      <div class="att-row"><span>Status lokasi</span><b id="eAttLocTxt">--</b></div>
+    </div>
+    <button type="button" class="btn btn-light btn-block" id="eAttGps">Perbarui Lokasi</button>
+    <button type="button" class="btn btn-primary btn-lg btn-block att-submit" id="eAttSubmit" disabled>${label}</button>
+  </div>`;
+  document.body.appendChild(modal);
+  const $m = s => modal.querySelector(s);
+  const video = $m('#eAttVideo'), img = $m('#eAttPhoto');
+
+  const evalGeo = () => {
+    if(!flow.geo || !t.latitude || !t.longitude) return null;
+    const dist = haversine(flow.geo.lat, flow.geo.lng, Number(t.latitude), Number(t.longitude));
+    return {dist, inside:dist <= Number(t.radius || 100), accOk:flow.geo.acc <= Number(c.max_accuracy_meter || 150)};
+  };
+  const render = () => {
+    const showPhoto = !!flow.blob;
+    video.hidden = showPhoto; img.hidden = !showPhoto;
+    const msg = showPhoto ? '' : (flow.camMsg || '');
+    $m('#eAttCamMsg').textContent = msg; $m('#eAttCamMsg').hidden = !msg;
+    $m('#eAttShoot').hidden = showPhoto; $m('#eAttShoot').disabled = !flow.stream || !!flow.camMsg;
+    $m('#eAttRetake').hidden = !(showPhoto || flow.camErr);
+    $m('#eAttRetake').textContent = flow.camErr && !showPhoto ? 'Coba Kamera Lagi' : 'Ambil Ulang';
+    $m('#eAttUse').hidden = !(showPhoto && !flow.accepted);
+    const ev = evalGeo();
+    const gpsTxt=$m('#eAttGpsTxt'), locTxt=$m('#eAttLocTxt');
+    $m('#eAttGps').disabled = flow.geoBusy || flow.busy;
+    if(flow.geoBusy){gpsTxt.textContent='Mendapatkan lokasi...';gpsTxt.className='';$m('#eAttAccTxt').textContent='-- meter';$m('#eAttDistTxt').textContent='--';locTxt.textContent='--';locTxt.className='';}
+    else if(flow.geoErr){gpsTxt.textContent=flow.geoErr;gpsTxt.className='bad';$m('#eAttAccTxt').textContent='-- meter';$m('#eAttDistTxt').textContent='--';locTxt.textContent='--';locTxt.className='';}
+    else if(ev){
+      gpsTxt.textContent='GPS berhasil';gpsTxt.className='ok';
+      $m('#eAttAccTxt').textContent=`${Math.round(flow.geo.acc)} meter`;
+      $m('#eAttDistTxt').textContent=`${Math.round(ev.dist)} meter`;
+      if(!ev.accOk){locTxt.textContent=`Akurasi GPS terlalu rendah (maks ${c.max_accuracy_meter} m).`;locTxt.className='bad';}
+      else if(!ev.inside){locTxt.textContent=`Di luar area absensi (radius ${t.radius} m).`;locTxt.className='bad';}
+      else{locTxt.textContent=`Di dalam area absensi (radius ${t.radius} m)`;locTxt.className='ok';}
+    }
+    $m('#eAttSubmit').disabled=!(flow.accepted && ev && ev.inside && ev.accOk) || flow.busy || flow.geoBusy;
+    $m('#eAttSubmit').textContent=flow.busy?'Mengirim...':label;
+  };
+  const stopCamera=()=>{if(flow.stream){flow.stream.getTracks().forEach(tr=>tr.stop());flow.stream=null;}video.srcObject=null;};
+  const camError=e=>(e&&(e.name==='NotAllowedError'||e.name==='PermissionDeniedError'))?'Camera tidak diizinkan. Izinkan akses kamera untuk situs ini.':(e&&(e.name==='NotFoundError'||e.name==='DevicesNotFoundError'))?'Kamera tidak ditemukan di perangkat ini.':'Kamera tidak dapat dibuka. Pastikan tidak sedang dipakai aplikasi lain.';
+  const startCamera=async()=>{
+    stopCamera();flow.camErr=null;flow.camMsg='Meminta akses kamera...';render();
+    try{const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:{ideal:1280},height:{ideal:960}},audio:false});
+      if(!document.body.contains(modal)){stream.getTracks().forEach(tr=>tr.stop());return;}
+      flow.stream=stream;video.srcObject=stream;try{await video.play();}catch(_){}flow.camMsg='';render();
+    }catch(e){flow.camErr=camError(e);flow.camMsg=flow.camErr;render();}
+  };
+  const fetchGps=async()=>{
+    flow.geoBusy=true;flow.geo=null;flow.geoErr=null;render();
+    try{const pos=await new Promise((res,rej)=>navigator.geolocation.getCurrentPosition(res,rej,{enableHighAccuracy:true,timeout:20000,maximumAge:0}));flow.geo={lat:pos.coords.latitude,lng:pos.coords.longitude,acc:pos.coords.accuracy};}
+    catch(err){flow.geoErr=err&&err.code===1?'Lokasi tidak diizinkan. Izinkan lokasi untuk situs ini.':'Lokasi tidak dapat diperoleh. Aktifkan GPS dan izin lokasi browser.';}
+    flow.geoBusy=false;render();
+  };
+  const closeFlow=()=>{stopCamera();if(flow.previewUrl)URL.revokeObjectURL(flow.previewUrl);modal.remove();};
+  $m('#eAttClose').onclick=()=>{if(flow.busy){toast('Sedang mengirim absensi, mohon tunggu.','error');return;}closeFlow();};
+  $m('#eAttShoot').onclick=()=>{
+    const vw=video.videoWidth,vh=video.videoHeight;if(!vw||!vh){toast('Kamera belum siap.','error');return;}
+    const scale=Math.min(1,960/Math.max(vw,vh));const canvas=document.createElement('canvas');canvas.width=Math.round(vw*scale);canvas.height=Math.round(vh*scale);canvas.getContext('2d').drawImage(video,0,0,canvas.width,canvas.height);
+    canvas.toBlob(b=>{if(!b){toast('Gagal mengambil foto.','error');return;}if(flow.previewUrl)URL.revokeObjectURL(flow.previewUrl);flow.blob=b;flow.previewUrl=URL.createObjectURL(b);img.src=flow.previewUrl;flow.accepted=false;render();},'image/jpeg',0.8);
+  };
+  $m('#eAttRetake').onclick=async()=>{if(flow.previewUrl)URL.revokeObjectURL(flow.previewUrl);flow.previewUrl=null;flow.blob=null;flow.accepted=false;img.removeAttribute('src');if(flow.stream)render();else await startCamera();};
+  $m('#eAttUse').onclick=()=>{flow.accepted=true;stopCamera();render();};
+  $m('#eAttGps').onclick=fetchGps;
+  $m('#eAttSubmit').onclick=async()=>{
+    const ev=evalGeo();
+    if(!flow.accepted||!flow.blob){toast('Selfie wajib diambil sebelum absensi.','error');return;}
+    if(!ev||!ev.accOk||!ev.inside){toast('Lokasi tidak memenuhi syarat absensi.','error');return;}
+    flow.busy=true;render();
+    let path=null;
+    try{
+      const [yyyy,mm]=String(c.today).split('-');
+      const empId=empPortal.employee?.id;
+      path=`attendance/${empId}/${yyyy}/${mm}/${c.today}/${isIn?'check-in':'check-out'}-${Date.now()}.jpg`;
+      const up=await sb.storage.from('attendance-photos').upload(path,flow.blob,{contentType:'image/jpeg',upsert:false});
+      if(up.error)throw up.error;
+      const {error}=await sb.rpc('employee_submit_attendance',{p_token:empPortal.token,p_action:action,p_latitude:flow.geo.lat,p_longitude:flow.geo.lng,p_accuracy:flow.geo.acc,p_photo_path:path});
+      if(error)throw error;
+      closeFlow();toast(isIn?'Absensi masuk berhasil.':'Absensi keluar berhasil.');
+      await employeePortalView('attendance');
+    }catch(err){toast(friendlyError(err),'error');}
+    finally{flow.busy=false;}
+  };
+  render();startCamera();fetchGps();
+}
+
+/* Override only the Employee Portal attendance view; admin attendance remains unchanged. */
+const __phase8aEmployeePortalView = employeePortalView;
+employeePortalView = async function(view){
+  if(view !== 'attendance') return await __phase8aEmployeePortalView(view);
+  const box=$('#epContent'); if(!box)return;
+  await employeeAttendancePanel(box);
+};
+
+console.log('HR Employee System Phase 8A loaded: Employee Portal Selfie + GPS Attendance');
