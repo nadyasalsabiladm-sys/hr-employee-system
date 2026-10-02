@@ -6305,3 +6305,162 @@ employeePortalView = async function(view){
 };
 
 console.log('HR Employee System Phase 8A loaded: Employee Portal Selfie + GPS Attendance');
+
+/* =========================================================
+   PHASE 9 — RIWAYAT ABSENSI KARYAWAN
+   Menambahkan riwayat ke Portal Karyawan tanpa mengubah
+   alur selfie + GPS Phase 8A.
+   ========================================================= */
+
+function phase9MonthRange() {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const last = new Date(y, now.getMonth() + 1, 0).getDate();
+  return { from: `${y}-${m}-01`, to: `${y}-${m}-${String(last).padStart(2, '0')}` };
+}
+
+function phase9FmtDuration(inAt, outAt) {
+  if (!inAt || !outAt) return '-';
+  const ms = new Date(outAt).getTime() - new Date(inAt).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return '-';
+  const mins = Math.floor(ms / 60000);
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return `${h} jam ${String(m).padStart(2, '0')} menit`;
+}
+
+function phase9StatusBadge(status) {
+  const x = ATT_STATUS[status] || [status || '-', 'badge-gray'];
+  return `<span class="badge ${x[1]}">${esc(x[0])}</span>`;
+}
+
+async function phase9LoadHistory(from, to) {
+  return await empRpc('employee_attendance_history', {
+    p_from: from,
+    p_to: to
+  });
+}
+
+function phase9Summary(rows) {
+  const total = rows.length;
+  const late = rows.filter(r => r.check_in_status === 'late').length;
+  const valid = rows.filter(r => r.check_in_status === 'valid').length;
+  const incomplete = rows.filter(r => r.check_in_at && !r.check_out_at).length;
+  return { total, late, valid, incomplete };
+}
+
+async function phase9RenderHistory(box, from, to) {
+  box.innerHTML = `<div class="section"><div class="card empty">Memuat riwayat absensi...</div></div>`;
+  try {
+    const rows = await phase9LoadHistory(from, to) || [];
+    const s = phase9Summary(rows);
+
+    box.innerHTML = `
+      <div class="section">
+        <div class="section-head">
+          <div>
+            <h2>Riwayat Absensi</h2>
+            <div class="muted">Data absensi pribadi berdasarkan tanggal yang dipilih.</div>
+          </div>
+          <button type="button" class="btn btn-light" id="phase9Refresh">Refresh</button>
+        </div>
+
+        <div class="toolbar" style="margin-bottom:14px">
+          <label style="min-width:150px">Dari
+            <input type="date" id="phase9From" value="${esc(from)}">
+          </label>
+          <label style="min-width:150px">Sampai
+            <input type="date" id="phase9To" value="${esc(to)}">
+          </label>
+          <button type="button" class="btn btn-primary" id="phase9Apply">Tampilkan</button>
+          <button type="button" class="btn btn-light" id="phase9ThisMonth">Bulan Ini</button>
+        </div>
+
+        <div class="cards">
+          <div class="card"><div class="muted">Hari tercatat</div><div class="metric">${s.total}</div></div>
+          <div class="card"><div class="muted">Tepat waktu</div><div class="metric">${s.valid}</div></div>
+          <div class="card"><div class="muted">Terlambat</div><div class="metric">${s.late}</div></div>
+          <div class="card"><div class="muted">Belum checkout</div><div class="metric">${s.incomplete}</div></div>
+        </div>
+
+        <div class="table-wrap" style="margin-top:14px">
+          ${rows.length ? `
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Tanggal</th>
+                <th>Lokasi</th>
+                <th>Masuk</th>
+                <th>Keluar</th>
+                <th>Durasi</th>
+                <th>Status Masuk</th>
+                <th>Status Keluar</th>
+                <th>Jarak</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows.map(r => `
+                <tr>
+                  <td><b>${esc(fmtDate(r.attendance_date))}</b></td>
+                  <td>${esc(r.work_location_name || '-')}</td>
+                  <td>${r.check_in_at ? esc(fmtTime(r.check_in_at, 'Asia/Jakarta')) : '-'}</td>
+                  <td>${r.check_out_at ? esc(fmtTime(r.check_out_at, 'Asia/Jakarta')) : '<span class="muted">Belum</span>'}</td>
+                  <td>${esc(phase9FmtDuration(r.check_in_at, r.check_out_at))}</td>
+                  <td>${r.check_in_status ? phase9StatusBadge(r.check_in_status) : '-'}</td>
+                  <td>${r.check_out_status ? phase9StatusBadge(r.check_out_status) : '-'}</td>
+                  <td>${r.check_in_distance_meter != null ? `Masuk ${Math.round(Number(r.check_in_distance_meter))} m` : '-'}${r.check_out_distance_meter != null ? `<br><span class="muted">Keluar ${Math.round(Number(r.check_out_distance_meter))} m</span>` : ''}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>` : '<div class="card empty">Tidak ada data absensi pada periode ini.</div>'}
+        </div>
+
+        <div class="info-box" style="margin-top:14px">
+          Foto selfie, koordinat GPS, akurasi GPS, dan jarak dari lokasi kerja tetap tersimpan pada data absensi. Riwayat ini hanya menampilkan data milik Anda.
+        </div>
+      </div>`;
+
+    const reload = async (f, t) => {
+      const a = document.getElementById('phase9From');
+      const b = document.getElementById('phase9To');
+      if (a) a.value = f;
+      if (b) b.value = t;
+      await phase9RenderHistory(box, f, t);
+    };
+
+    $('#phase9Refresh')?.addEventListener('click', () => reload(from, to));
+    $('#phase9Apply')?.addEventListener('click', () => {
+      const f = $('#phase9From')?.value;
+      const t = $('#phase9To')?.value;
+      if (!f || !t) { toast('Tanggal awal dan akhir wajib diisi.', 'error'); return; }
+      if (f > t) { toast('Tanggal awal tidak boleh setelah tanggal akhir.', 'error'); return; }
+      reload(f, t);
+    });
+    $('#phase9ThisMonth')?.addEventListener('click', () => {
+      const r = phase9MonthRange();
+      reload(r.from, r.to);
+    });
+  } catch (err) {
+    box.innerHTML = `<div class="section"><div class="card"><div class="error">${esc(friendlyError(err))}</div></div></div>`;
+  }
+}
+
+// Re-wrap attendance so the existing Phase 8A panel remains intact,
+// then append the employee's private attendance history below it.
+const __phase9AttendanceView = __phase9OriginalEmployeePortalView;
+employeePortalView = async function(view) {
+  if (view !== 'attendance') return await __phase9AttendanceView(view);
+  const box = $('#epContent');
+  if (!box) return;
+
+  await employeeAttendancePanel(box);
+
+  const range = phase9MonthRange();
+  const historyBox = document.createElement('div');
+  historyBox.id = 'phase9HistoryBox';
+  box.appendChild(historyBox);
+  await phase9RenderHistory(historyBox, range.from, range.to);
+};
+
+console.log('HR Employee System Phase 9 loaded: Employee Attendance History + Summary');
