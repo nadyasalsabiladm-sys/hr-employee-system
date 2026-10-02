@@ -5157,6 +5157,30 @@ function phase7Select(name, label, value, id, placeholder='Pilih...') {
   return `<div class="field"><label>${label}</label><select name="${name}" id="${id}" data-current="${current}"><option value="">${placeholder}</option></select></div>`;
 }
 
+function phase7StaticSelect(name, label, value, options, placeholder='Pilih...') {
+  const current = String(phase7Val(value, name) || '').trim();
+  const html = [`<option value="">${esc(placeholder)}</option>`];
+  for (const item of options) {
+    const val = String(item?.value ?? item ?? '');
+    const text = String(item?.label ?? item ?? '');
+    if (!val) continue;
+    const selected = val.toLowerCase() === current.toLowerCase() ? ' selected' : '';
+    html.push(`<option value="${esc(val)}"${selected}>${esc(text)}</option>`);
+  }
+  return `<div class="field"><label>${label}</label><select name="${name}">${html.join('')}</select></div>`;
+}
+
+const PHASE7_GENDER_OPTIONS = ['Laki-laki','Perempuan'];
+const PHASE7_RELIGION_OPTIONS = ['Islam','Kristen Protestan','Katolik','Hindu','Buddha','Konghucu'];
+const PHASE7_MARITAL_OPTIONS = ['Belum Menikah','Menikah','Cerai Hidup','Cerai Mati'];
+const PHASE7_BLOOD_OPTIONS = ['A','B','AB','O','Tidak Tahu'];
+const PHASE7_CITIZENSHIP_OPTIONS = ['WNI','WNA'];
+const PHASE7_EDUCATION_OPTIONS = ['SD','SMP','SMA','SMK','D1','D2','D3','D4','S1','S2','S3'];
+const PHASE7_SHIRT_OPTIONS = ['XS','S','M','L','XL','XXL','XXXL','4XL','5XL'];
+const PHASE7_PANTS_OPTIONS = Array.from({length: 13}, (_,i) => String(28 + i * 2));
+const PHASE7_SHOE_OPTIONS = Array.from({length: 14}, (_,i) => String(35 + i));
+const PHASE7_EMERGENCY_RELATION_OPTIONS = ['Suami','Istri','Ayah','Ibu','Anak','Kakak','Adik','Saudara','Wali','Lainnya'];
+
 function phase7Textarea(name, label, value, full=true) {
   return `<div class="field ${full ? 'field-full' : ''}"><label>${label}</label><textarea name="${name}" rows="3">${phase7Val(value,name)}</textarea></div>`;
 }
@@ -5364,13 +5388,13 @@ async function phase7RenderProfile() {
         <form id="phase7ProfileForm" class="modal-grid" style="margin-top:14px">
           <div class="field field-full"><div class="sub-title">Data Pribadi</div></div>
           ${phase7Input('nickname','Nama Panggilan',p)}
-          ${phase7Input('gender','Jenis Kelamin',p,'text','Laki-laki / Perempuan')}
+          ${phase7StaticSelect('gender','Jenis Kelamin',p,PHASE7_GENDER_OPTIONS)}
           ${phase7Input('birth_place','Tempat Lahir',p)}
           ${phase7Input('birth_date','Tanggal Lahir',p,'date')}
-          ${phase7Input('religion','Agama',p)}
-          ${phase7Input('marital_status','Status Perkawinan',p)}
-          ${phase7Input('blood_type','Golongan Darah',p)}
-          ${phase7Input('citizenship','Kewarganegaraan',p,'text','WNI / WNA')}
+          ${phase7StaticSelect('religion','Agama',p,PHASE7_RELIGION_OPTIONS)}
+          ${phase7StaticSelect('marital_status','Status Perkawinan',p,PHASE7_MARITAL_OPTIONS)}
+          ${phase7StaticSelect('blood_type','Golongan Darah',p,PHASE7_BLOOD_OPTIONS)}
+          ${phase7StaticSelect('citizenship','Kewarganegaraan',p,PHASE7_CITIZENSHIP_OPTIONS)}
           ${phase7Input('personal_phone','No. HP Pribadi',p,'tel')}
           ${phase7Input('personal_email','Email Pribadi',p,'email')}
 
@@ -5389,18 +5413,18 @@ async function phase7RenderProfile() {
 
           <div class="field field-full"><div class="sub-title">Kontak Darurat</div></div>
           ${phase7Input('emergency_name','Nama Kontak Darurat',p)}
-          ${phase7Input('emergency_relation','Hubungan',p)}
+          ${phase7StaticSelect('emergency_relation','Hubungan',p,PHASE7_EMERGENCY_RELATION_OPTIONS)}
           ${phase7Input('emergency_phone','No. HP Kontak Darurat',p,'tel')}
 
           <div class="field field-full"><div class="sub-title">Pendidikan</div></div>
-          ${phase7Input('education_level','Pendidikan Terakhir',p)}
+          ${phase7StaticSelect('education_level','Pendidikan Terakhir',p,PHASE7_EDUCATION_OPTIONS)}
           ${phase7Input('major','Jurusan',p)}
           ${phase7Input('school_name','Nama Sekolah / Universitas',p)}
 
           <div class="field field-full"><div class="sub-title">Ukuran Seragam</div></div>
-          ${phase7Input('shirt_size','Ukuran Baju',p)}
-          ${phase7Input('pants_size','Ukuran Celana',p)}
-          ${phase7Input('shoe_size','Ukuran Sepatu',p)}
+          ${phase7StaticSelect('shirt_size','Ukuran Baju',p,PHASE7_SHIRT_OPTIONS)}
+          ${phase7StaticSelect('pants_size','Ukuran Celana',p,PHASE7_PANTS_OPTIONS)}
+          ${phase7StaticSelect('shoe_size','Ukuran Sepatu',p,PHASE7_SHOE_OPTIONS)}
 
           <div class="field field-full"><div class="sub-title">Data Pembayaran</div><div class="muted">Data rekening dapat diisi bila diperlukan oleh perusahaan.</div></div>
           ${phase7Input('bank_name','Bank',p)}
