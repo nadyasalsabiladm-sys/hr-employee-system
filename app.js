@@ -6448,7 +6448,7 @@ async function phase9RenderHistory(box, from, to) {
 
 // Re-wrap attendance so the existing Phase 8A panel remains intact,
 // then append the employee's private attendance history below it.
-const __phase9AttendanceView = __phase8aEmployeePortalView;
+const __phase9AttendanceView = __phase9OriginalEmployeePortalView;
 employeePortalView = async function(view) {
   if (view !== 'attendance') return await __phase9AttendanceView(view);
   const box = $('#epContent');
@@ -6464,138 +6464,217 @@ employeePortalView = async function(view) {
 };
 
 console.log('HR Employee System Phase 9 loaded: Employee Attendance History + Summary');
-
-
 /* =========================================================
-   PHASE 11C — DASHBOARD ALERT KONTRAK
-   PATCH-ONLY: tidak mengganti dashboard lama.
-   Dashboard lama tetap tampil, lalu bagian alert ditambahkan
-   di bawahnya. Semua Phase 7, 8A, 9, dan 10 dipertahankan.
+   PHASE 12B — CUTI & IZIN POLICY UI
+   PATCH-ONLY. Tidak mengganti modul Phase 6.
+   Menambahkan saldo berbasis policy engine + kalender 2026
+   di atas halaman Cuti & Izin yang sudah ada.
    ========================================================= */
 
-const __phase11cOriginalDashboard = dashboard;
+async function phase12bLoadBalance(year) {
+  const { data, error } = await sb
+    .from('leave_balance_summary')
+    .select('*')
+    .eq('leave_year', year)
+    .eq('leave_type_code', 'ANNUAL')
+    .order('full_name', { ascending: true });
+  if (error) throw error;
+  return data || [];
+}
 
-function phase11cContractAlertHtml() {
-  const rows = (state.contracts || []).map(c => {
-    const e = (state.employees || []).find(x => x.id === c.employee_id);
-    const days = daysUntil(c.end_date);
-    let level = 'normal';
-    let label = 'Belum mendekati jatuh tempo';
+async function phase12bLoadCalendar(year) {
+  const { data, error } = await sb
+    .from('hr_calendar_days')
+    .select('calendar_date,name,day_type,applies_to,is_day_off_office,is_day_off_kitchen,is_day_off_outlet,notes')
+    .gte('calendar_date', `${year}-01-01`)
+    .lte('calendar_date', `${year}-12-31`)
+    .order('calendar_date', { ascending: true });
+  if (error) throw error;
+  return data || [];
+}
 
-    if (c.status === 'expired' || (days !== null && days < 0)) {
-      level = 'expired';
-      label = 'Sudah Berakhir';
-    } else if (c.status === 'active' && days !== null && days <= 30) {
-      level = 'critical';
-      label = '≤ 30 Hari';
-    } else if (c.status === 'active' && days !== null && days <= 90) {
-      level = 'warning';
-      label = '31–90 Hari';
-    }
+function phase12bCalendarTypeLabel(v) {
+  const m = {
+    national_holiday: 'Libur Nasional',
+    joint_leave: 'Cuti Bersama',
+    company_holiday: 'Libur Perusahaan',
+    special_workday: 'Hari Kerja Khusus'
+  };
+  return m[v] || v || '-';
+}
 
-    return { c, e, days, level, label };
-  }).filter(x => x.level !== 'normal')
-    .sort((a,b) => {
-      const order = {expired:1, critical:2, warning:3};
-      return (order[a.level] - order[b.level]) ||
-        ((a.days ?? 999999) - (b.days ?? 999999));
-    });
+function phase12bBalanceBadge(days) {
+  const n = Number(days || 0);
+  if (n <= 0) return '<span class="badge badge-red">0 hari</span>';
+  if (n <= 2) return `<span class="badge badge-yellow">${n} hari</span>`;
+  return `<span class="badge badge-green">${n} hari</span>`;
+}
 
-  const expired = rows.filter(x => x.level === 'expired').length;
-  const critical = rows.filter(x => x.level === 'critical').length;
-  const warning = rows.filter(x => x.level === 'warning').length;
+function phase12bEmployeeName(id) {
+  const e = (state.employees || []).find(x => x.id === id);
+  return e?.full_name || '-';
+}
+
+function phase12bEnhancementHtml(balances, calendar, year) {
+  const activeIds = new Set((state.employees || [])
+    .filter(e => e.employment_status === 'active')
+    .map(e => e.id));
+
+  const rows = balances.filter(r => activeIds.size === 0 || activeIds.has(r.employee_id));
+  const totalEntitlement = rows.reduce((s,r) => s + Number(r.entitlement_days || 0) + Number(r.adjustment_days || 0), 0);
+  const totalUsed = rows.reduce((s,r) => s + Number(r.used_days || 0), 0);
+  const totalPending = rows.reduce((s,r) => s + Number(r.pending_days || 0), 0);
+  const totalForfeited = rows.reduce((s,r) => s + Number(r.forfeited_days || 0), 0);
+  const totalAvailable = rows.reduce((s,r) => s + Number(r.available_days || 0), 0);
+
+  const leaveRows = state.leave || [];
+  const decemberApproved = leaveRows
+    .filter(r => r.status === 'approved')
+    .reduce((s,r) => s + Number(r.december_days || 0), 0);
+  const decemberPending = leaveRows
+    .filter(r => ['pending','supervisor_approved'].includes(r.status))
+    .reduce((s,r) => s + Number(r.december_days || 0), 0);
+
+  const decViolations = leaveRows.filter(r =>
+    Number(r.december_days || 0) > 3 &&
+    String(r.leave_type_code || r.leave_types?.code || '').toUpperCase() === 'ANNUAL'
+  ).length;
+
+  const filterRows = () => {
+    const q = (document.getElementById('phase12bBalanceSearch')?.value || '').trim().toLowerCase();
+    return rows.filter(r => !q || `${r.full_name || ''} ${r.employee_number || ''}`.toLowerCase().includes(q));
+  };
 
   return `
-    <div class="section" id="phase11cContractAlerts">
+    <div class="section" id="phase12bPolicyPanel">
       <div class="section-head">
         <div>
-          <h2>⚠️ Alert Kontrak</h2>
-          <div class="muted">Kontrak yang memerlukan perhatian HR</div>
+          <h2>Policy Cuti ${year}</h2>
+          <div class="muted">Saldo dihitung dari mesin kebijakan Phase 12: hak, terpakai, pending, hangus, dan sisa tersedia.</div>
         </div>
-        <button class="btn btn-light" onclick="gotoView('contracts')">Buka Kontrak</button>
+        <div class="row-actions">
+          <button type="button" class="btn btn-light btn-sm" id="phase12bRefresh">Refresh Policy</button>
+        </div>
       </div>
 
       <div class="cards">
-        <div class="card">
-          <div class="muted">Sudah Berakhir</div>
-          <div class="metric">${expired}</div>
-        </div>
-        <div class="card">
-          <div class="muted">Berakhir ≤ 30 Hari</div>
-          <div class="metric">${critical}</div>
-        </div>
-        <div class="card">
-          <div class="muted">Berakhir 31–90 Hari</div>
-          <div class="metric">${warning}</div>
-        </div>
+        <div class="card"><div class="muted">Total Hak + Penyesuaian</div><div class="metric">${totalEntitlement}</div><div class="muted">hari</div></div>
+        <div class="card"><div class="muted">Sudah Digunakan</div><div class="metric">${totalUsed}</div><div class="muted">hari</div></div>
+        <div class="card"><div class="muted">Sedang Diajukan</div><div class="metric">${totalPending}</div><div class="muted">hari</div></div>
+        <div class="card"><div class="muted">Sisa Tersedia</div><div class="metric">${totalAvailable}</div><div class="muted">hari</div></div>
       </div>
 
-      ${rows.length ? `
-        <div class="table-wrap" style="margin-top:14px">
-          <table class="table">
-            <thead>
-              <tr>
-                <th>Karyawan</th>
-                <th>No. Dokumen</th>
-                <th>Jenis</th>
-                <th>Berakhir</th>
-                <th>Status Alert</th>
-                <th>Aksi</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${rows.map(x => `
-                <tr>
-                  <td>
-                    <b>${esc(x.e?.full_name || '-')}</b>
-                    <div class="muted">${esc(x.e?.employee_number || '')}</div>
-                  </td>
-                  <td>${esc(x.c.contract_number || '-')}</td>
-                  <td>${esc(contractTypeLabel(x.c.contract_type))}</td>
-                  <td>${fmtDate(x.c.end_date)}</td>
-                  <td>
-                    <span class="badge ${
-                      x.level === 'expired' ? 'badge-red' :
-                      x.level === 'critical' ? 'badge-yellow' : 'badge-blue'
-                    }">${esc(x.label)}</span>
-                  </td>
-                  <td>
-                    <button class="btn btn-light btn-sm"
-                      onclick="gotoView('contracts')">Buka</button>
-                  </td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
+      <div class="cards" style="margin-top:12px">
+        <div class="card"><div class="muted">Cuti Desember Disetujui</div><div class="metric">${decemberApproved}</div><div class="muted">hari kerja</div></div>
+        <div class="card"><div class="muted">Cuti Desember Pending</div><div class="metric">${decemberPending}</div><div class="muted">hari kerja</div></div>
+        <div class="card"><div class="muted">Saldo Hangus</div><div class="metric">${totalForfeited}</div><div class="muted">hari</div></div>
+        <div class="card"><div class="muted">Validasi > 3 Hari Desember</div><div class="metric">${decViolations}</div><div class="muted">pengajuan</div></div>
+      </div>
+
+      <div class="info-box" style="margin-top:14px">
+        <b>Aturan penting:</b> penggunaan Cuti Tahunan di bulan Desember maksimal <b>3 hari kerja</b>.
+        Hari Minggu, libur nasional, dan cuti bersama mengikuti kebijakan kalender/karyawan yang tersimpan di sistem.
+        Cuti yang tersisa sampai penutupan tahun dapat diproses sebagai <b>hangus</b> oleh HR.
+      </div>
+
+      <div class="section-head" style="margin-top:18px">
+        <div>
+          <h3 class="sub-title">Saldo Cuti Tahunan per Karyawan</h3>
+          <div class="muted">Nilai di bawah berasal langsung dari <code>leave_balance_summary</code>.</div>
         </div>
-      ` : `
-        <div class="card empty" style="margin-top:14px">
-          Tidak ada kontrak yang masuk daftar alert saat ini.
+        <input id="phase12bBalanceSearch" type="search" placeholder="Cari nama / ID karyawan..." style="min-width:250px">
+      </div>
+
+      <div class="table-wrap" id="phase12bBalanceTable">
+        ${rows.length ? `
+        <table class="table">
+          <thead><tr>
+            <th>Karyawan</th><th>Hak</th><th>Terpakai</th><th>Pending</th><th>Hangus</th><th>Sisa</th>
+          </tr></thead>
+          <tbody id="phase12bBalanceBody">
+            ${rows.map(r => `<tr>
+              <td><b>${esc(r.full_name || phase12bEmployeeName(r.employee_id))}</b><div class="muted">${esc(r.employee_number || '-')}</div></td>
+              <td>${Number(r.entitlement_days || 0) + Number(r.adjustment_days || 0)}</td>
+              <td>${Number(r.used_days || 0)}</td>
+              <td>${Number(r.pending_days || 0)}</td>
+              <td>${Number(r.forfeited_days || 0)}</td>
+              <td>${phase12bBalanceBadge(r.available_days)}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>` : '<div class="card empty">Belum ada saldo cuti tahunan untuk tahun ini.</div>'}
+      </div>
+
+      <div class="section-head" style="margin-top:20px">
+        <div>
+          <h3 class="sub-title">Kalender Kebijakan ${year}</h3>
+          <div class="muted">Libur nasional dan cuti bersama yang menjadi dasar perhitungan hari kerja.</div>
         </div>
-      `}
+      </div>
+      <div class="table-wrap">
+        ${calendar.length ? `
+        <table class="table">
+          <thead><tr><th>Tanggal</th><th>Nama</th><th>Jenis</th><th>Berlaku</th><th>Catatan</th></tr></thead>
+          <tbody>
+            ${calendar.map(c => `<tr>
+              <td><b>${esc(fmtDate(c.calendar_date))}</b></td>
+              <td>${esc(c.name || '-')}</td>
+              <td>${esc(phase12bCalendarTypeLabel(c.day_type))}</td>
+              <td>${esc(c.applies_to || 'all')}</td>
+              <td>${esc(c.notes || '-')}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>` : '<div class="card empty">Belum ada kalender kebijakan.</div>'}
+      </div>
     </div>`;
 }
 
-/* PHASE 11C FINAL — hook renderApp after every full page render.
-   This is safer than wrapping dashboard because Phase 7/10 also wrap renderApp.
-*/
-const __phase11cOriginalRenderApp = renderApp;
-renderApp = function() {
-  __phase11cOriginalRenderApp();
-  if (state.view !== 'dashboard') return;
+const __phase12bOriginalLeave = leave;
+leave = async function() {
+  // Render modul Phase 6 terlebih dahulu agar approval SPV/HR tetap utuh.
+  __phase12bOriginalLeave();
+
   const content = $('#content');
   if (!content) return;
-  const old = document.getElementById('phase11cContractAlerts');
-  if (old) old.remove();
+  document.getElementById('phase12bPolicyPanel')?.remove();
+
+  const year = new Date().getFullYear();
   try {
-    content.insertAdjacentHTML('beforeend', phase11cContractAlertHtml());
-    console.info('PHASE 11C ACTIVE — Alert Kontrak dirender setelah renderApp', {
-      contracts: Array.isArray(state.contracts) ? state.contracts.length : 0,
-      element: !!document.getElementById('phase11cContractAlerts')
-    });
+    const [balances, calendar] = await Promise.all([
+      phase12bLoadBalance(year),
+      phase12bLoadCalendar(year)
+    ]);
+
+    content.insertAdjacentHTML('afterbegin', phase12bEnhancementHtml(balances, calendar, year));
+
+    const search = $('#phase12bBalanceSearch');
+    const body = $('#phase12bBalanceBody');
+    const refresh = $('#phase12bRefresh');
+
+    const redraw = () => {
+      if (!body) return;
+      const q = (search?.value || '').trim().toLowerCase();
+      const activeIds = new Set((state.employees || [])
+        .filter(e => e.employment_status === 'active')
+        .map(e => e.id));
+      const filtered = balances.filter(r =>
+        (activeIds.size === 0 || activeIds.has(r.employee_id)) &&
+        (!q || `${r.full_name || ''} ${r.employee_number || ''}`.toLowerCase().includes(q))
+      );
+      body.innerHTML = filtered.length ? filtered.map(r => `<tr>
+        <td><b>${esc(r.full_name || '-')}</b><div class="muted">${esc(r.employee_number || '-')}</div></td>
+        <td>${Number(r.entitlement_days || 0) + Number(r.adjustment_days || 0)}</td>
+        <td>${Number(r.used_days || 0)}</td>
+        <td>${Number(r.pending_days || 0)}</td>
+        <td>${Number(r.forfeited_days || 0)}</td>
+        <td>${phase12bBalanceBadge(r.available_days)}</td>
+      </tr>`).join('') : '<tr><td colspan="6"><div class="card empty">Karyawan tidak ditemukan.</div></td></tr>';
+    };
+
+    search?.addEventListener('input', redraw);
+    refresh?.addEventListener('click', () => leave());
   } catch (err) {
-    console.error('PHASE 11C RENDER ERROR:', err);
+    content.insertAdjacentHTML('afterbegin', `<div class="section" id="phase12bPolicyPanel"><div class="card"><div class="error">Policy Cuti gagal dimuat: ${esc(friendlyError(err))}</div></div></div>`);
   }
 };
 
-console.log('HR Employee System Phase 11C FINAL loaded: Dashboard Contract Alerts via renderApp');
+console.log('HR Employee System Phase 12B loaded: Cuti & Izin Policy UI (patch-only)');
