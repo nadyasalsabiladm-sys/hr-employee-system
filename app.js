@@ -6748,3 +6748,282 @@ window.p6NewLeave = function(employeeId = '') {
 console.log(
   'PHASE 12C FINAL LOADED — CUTI USES leave_workdays_between'
 );
+/* =========================================================
+   PHASE 11C FINAL — CONTRACT ALERT DASHBOARD PATCH
+   Tujuan:
+   - Mengembalikan alert kontrak di Dashboard.
+   - Tidak mengubah Phase 12C / modul cuti.
+   - Patch ini ditempel PALING BAWAH app.js.
+   - Membaca data dari public.contracts_alert_view.
+   ========================================================= */
+
+(function () {
+  if (window.__PHASE11C_FINAL_CONTRACT_ALERT__) {
+    console.log('PHASE 11C FINAL already loaded.');
+    return;
+  }
+  window.__PHASE11C_FINAL_CONTRACT_ALERT__ = true;
+
+  async function phase11cLoadContractAlerts() {
+    const { data, error } = await sb
+      .from('contracts_alert_view')
+      .select('*');
+
+    if (error) {
+      console.error('PHASE 11C CONTRACT ALERT ERROR:', error);
+      return [];
+    }
+
+    return Array.isArray(data) ? data : [];
+  }
+
+  function phase11cAlertStatus(row) {
+    return String(
+      row.alert_status ??
+      row.contract_alert_status ??
+      row.status_alert ??
+      row.alert_type ??
+      row.contract_status ??
+      ''
+    ).toLowerCase();
+  }
+
+  function phase11cDays(row) {
+    const v =
+      row.days_remaining ??
+      row.remaining_days ??
+      row.days_until_end ??
+      row.sisa_hari;
+
+    if (v === null || v === undefined || v === '') return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  function phase11cName(row) {
+    return row.full_name ??
+      row.employee_name ??
+      row.nama_karyawan ??
+      row.name ??
+      '-';
+  }
+
+  function phase11cEmployeeNumber(row) {
+    return row.employee_number ??
+      row.employee_no ??
+      row.nip ??
+      row.id_karyawan ??
+      '-';
+  }
+
+  function phase11cContractNumber(row) {
+    return row.contract_number ??
+      row.contract_no ??
+      row.nomor_kontrak ??
+      '-';
+  }
+
+  function phase11cContractType(row) {
+    return row.contract_type_label ??
+      row.contract_type ??
+      row.jenis_kontrak ??
+      '-';
+  }
+
+  function phase11cEndDate(row) {
+    return row.end_date ??
+      row.contract_end_date ??
+      row.tanggal_berakhir ??
+      null;
+  }
+
+  function phase11cClass(row) {
+    const s = phase11cAlertStatus(row);
+    const n = phase11cDays(row);
+
+    if (
+      s.includes('expired') ||
+      s.includes('berakhir') && !s.includes('30') && !s.includes('90') ||
+      (n !== null && n < 0)
+    ) return 'badge-red';
+
+    if (
+      s.includes('critical') ||
+      s.includes('30') ||
+      (n !== null && n >= 0 && n <= 30)
+    ) return 'badge-yellow';
+
+    return 'badge-blue';
+  }
+
+  function phase11cLabel(row) {
+    const s = phase11cAlertStatus(row);
+    const n = phase11cDays(row);
+
+    if (s.includes('expired') || (n !== null && n < 0)) {
+      return 'Sudah Berakhir';
+    }
+
+    if (
+      s.includes('critical') ||
+      s.includes('30') ||
+      (n !== null && n >= 0 && n <= 30)
+    ) {
+      return n === null ? '≤ 30 hari' : `≤ 30 hari (${n} hari)`;
+    }
+
+    if (
+      s.includes('warning') ||
+      s.includes('90') ||
+      (n !== null && n > 30 && n <= 90)
+    ) {
+      return n === null ? '≤ 90 hari' : `≤ 90 hari (${n} hari)`;
+    }
+
+    return s || 'Perlu perhatian';
+  }
+
+  function phase11cDate(row) {
+    const d = phase11cEndDate(row);
+    if (!d) return '-';
+
+    try {
+      if (typeof fmtDate === 'function') return fmtDate(d);
+      return new Date(d + 'T00:00:00').toLocaleDateString('id-ID');
+    } catch (_) {
+      return String(d);
+    }
+  }
+
+  function phase11cRender(rows) {
+    const old = document.getElementById('phase11cContractAlerts');
+    if (old) old.remove();
+
+    const expired = rows.filter(r => {
+      const n = phase11cDays(r);
+      const s = phase11cAlertStatus(r);
+      return s.includes('expired') || (n !== null && n < 0);
+    });
+
+    const critical = rows.filter(r => {
+      const n = phase11cDays(r);
+      const s = phase11cAlertStatus(r);
+      return !s.includes('expired') &&
+        (s.includes('critical') || s.includes('30') || (n !== null && n >= 0 && n <= 30));
+    });
+
+    const warning = rows.filter(r => {
+      const n = phase11cDays(r);
+      const s = phase11cAlertStatus(r);
+      return !s.includes('expired') &&
+        !s.includes('critical') &&
+        !s.includes('30') &&
+        (s.includes('warning') || s.includes('90') || (n !== null && n > 30 && n <= 90));
+    });
+
+    const esc11c = v =>
+      typeof esc === 'function'
+        ? esc(v)
+        : String(v ?? '').replace(/[&<>'"]/g, c => ({
+            '&':'&amp;', '<':'&lt;', '>':'&gt;',
+            "'":'&#39;', '"':'&quot;'
+          }[c]));
+
+    const allRows = [...expired, ...critical, ...warning];
+
+    const html = `
+      <div id="phase11cContractAlerts" class="section" style="margin-top:16px;">
+        <div class="section-head">
+          <div>
+            <h2>⚠️ Peringatan Kontrak</h2>
+            <div class="muted">Pemantauan masa berlaku kontrak karyawan</div>
+          </div>
+        </div>
+
+        <div class="cards" style="margin-bottom:14px;">
+          <div class="card">
+            <div class="muted">Sudah Berakhir</div>
+            <div class="metric">${expired.length}</div>
+          </div>
+          <div class="card">
+            <div class="muted">Berakhir ≤ 30 Hari</div>
+            <div class="metric">${critical.length}</div>
+          </div>
+          <div class="card">
+            <div class="muted">Berakhir ≤ 90 Hari</div>
+            <div class="metric">${warning.length}</div>
+          </div>
+        </div>
+
+        ${
+          allRows.length
+            ? `<div class="table-wrap">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>Karyawan</th>
+                      <th>No. Kontrak</th>
+                      <th>Jenis</th>
+                      <th>Tanggal Berakhir</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${allRows.map(r => `
+                      <tr>
+                        <td>
+                          <b>${esc11c(phase11cName(r))}</b>
+                          <div class="muted">${esc11c(phase11cEmployeeNumber(r))}</div>
+                        </td>
+                        <td>${esc11c(phase11cContractNumber(r))}</td>
+                        <td>${esc11c(phase11cContractType(r))}</td>
+                        <td>${esc11c(phase11cDate(r))}</td>
+                        <td>
+                          <span class="badge ${phase11cClass(r)}">
+                            ${esc11c(phase11cLabel(r))}
+                          </span>
+                        </td>
+                      </tr>
+                    `).join('')}
+                  </tbody>
+                </table>
+              </div>`
+            : `<div class="card" style="padding:18px;">
+                <b>✓ Tidak ada kontrak yang perlu perhatian saat ini.</b>
+                <div class="muted" style="margin-top:5px;">
+                  Kontrak yang sudah berakhir atau mendekati tanggal berakhir akan muncul otomatis di sini.
+                </div>
+              </div>`
+        }
+      </div>
+    `;
+
+    const content = document.getElementById('content');
+    if (!content) return;
+
+    content.insertAdjacentHTML('beforeend', html);
+  }
+
+  if (typeof dashboard === 'function') {
+    const __phase11cOriginalDashboardFinal = dashboard;
+
+    dashboard = async function () {
+      await __phase11cOriginalDashboardFinal();
+
+      try {
+        const rows = await phase11cLoadContractAlerts();
+        phase11cRender(rows);
+      } catch (err) {
+        console.error('PHASE 11C FINAL RENDER ERROR:', err);
+      }
+    };
+  } else {
+    console.error('PHASE 11C FINAL: dashboard() tidak ditemukan.');
+  }
+
+  window.phase11cLoadContractAlerts = phase11cLoadContractAlerts;
+
+  console.log(
+    'PHASE 11C FINAL LOADED — Contract Alert Dashboard restored.'
+  );
+})();
