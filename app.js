@@ -6464,227 +6464,13 @@ employeePortalView = async function(view) {
 };
 
 console.log('HR Employee System Phase 9 loaded: Employee Attendance History + Summary');
+
 /* =========================================================
-   PHASE 12B — CUTI & IZIN POLICY UI
-   PATCH-ONLY. Tidak mengganti modul Phase 6.
-   Menambahkan saldo berbasis policy engine + kalender 2026
-   di atas halaman Cuti & Izin yang sudah ada.
+   PHASE 12C FINAL — CUTI WORKDAY OVERRIDE
+   THIS BLOCK MUST REMAIN AT THE VERY END OF app.js
    ========================================================= */
 
-async function phase12bLoadBalance(year) {
-  const { data, error } = await sb
-    .from('leave_balance_summary')
-    .select('*')
-    .eq('leave_year', year)
-    .eq('leave_type_code', 'ANNUAL')
-    .order('full_name', { ascending: true });
-  if (error) throw error;
-  return data || [];
-}
-
-async function phase12bLoadCalendar(year) {
-  const { data, error } = await sb
-    .from('hr_calendar_days')
-    .select('calendar_date,name,day_type,applies_to,is_day_off_office,is_day_off_kitchen,is_day_off_outlet,notes')
-    .gte('calendar_date', `${year}-01-01`)
-    .lte('calendar_date', `${year}-12-31`)
-    .order('calendar_date', { ascending: true });
-  if (error) throw error;
-  return data || [];
-}
-
-function phase12bCalendarTypeLabel(v) {
-  const m = {
-    national_holiday: 'Libur Nasional',
-    joint_leave: 'Cuti Bersama',
-    company_holiday: 'Libur Perusahaan',
-    special_workday: 'Hari Kerja Khusus'
-  };
-  return m[v] || v || '-';
-}
-
-function phase12bBalanceBadge(days) {
-  const n = Number(days || 0);
-  if (n <= 0) return '<span class="badge badge-red">0 hari</span>';
-  if (n <= 2) return `<span class="badge badge-yellow">${n} hari</span>`;
-  return `<span class="badge badge-green">${n} hari</span>`;
-}
-
-function phase12bEmployeeName(id) {
-  const e = (state.employees || []).find(x => x.id === id);
-  return e?.full_name || '-';
-}
-
-function phase12bEnhancementHtml(balances, calendar, year) {
-  const activeIds = new Set((state.employees || [])
-    .filter(e => e.employment_status === 'active')
-    .map(e => e.id));
-
-  const rows = balances.filter(r => activeIds.size === 0 || activeIds.has(r.employee_id));
-  const totalEntitlement = rows.reduce((s,r) => s + Number(r.entitlement_days || 0) + Number(r.adjustment_days || 0), 0);
-  const totalUsed = rows.reduce((s,r) => s + Number(r.used_days || 0), 0);
-  const totalPending = rows.reduce((s,r) => s + Number(r.pending_days || 0), 0);
-  const totalForfeited = rows.reduce((s,r) => s + Number(r.forfeited_days || 0), 0);
-  const totalAvailable = rows.reduce((s,r) => s + Number(r.available_days || 0), 0);
-
-  const leaveRows = state.leave || [];
-  const decemberApproved = leaveRows
-    .filter(r => r.status === 'approved')
-    .reduce((s,r) => s + Number(r.december_days || 0), 0);
-  const decemberPending = leaveRows
-    .filter(r => ['pending','supervisor_approved'].includes(r.status))
-    .reduce((s,r) => s + Number(r.december_days || 0), 0);
-
-  const decViolations = leaveRows.filter(r =>
-    Number(r.december_days || 0) > 3 &&
-    String(r.leave_type_code || r.leave_types?.code || '').toUpperCase() === 'ANNUAL'
-  ).length;
-
-  const filterRows = () => {
-    const q = (document.getElementById('phase12bBalanceSearch')?.value || '').trim().toLowerCase();
-    return rows.filter(r => !q || `${r.full_name || ''} ${r.employee_number || ''}`.toLowerCase().includes(q));
-  };
-
-  return `
-    <div class="section" id="phase12bPolicyPanel">
-      <div class="section-head">
-        <div>
-          <h2>Policy Cuti ${year}</h2>
-          <div class="muted">Saldo dihitung dari mesin kebijakan Phase 12: hak, terpakai, pending, hangus, dan sisa tersedia.</div>
-        </div>
-        <div class="row-actions">
-          <button type="button" class="btn btn-light btn-sm" id="phase12bRefresh">Refresh Policy</button>
-        </div>
-      </div>
-
-      <div class="cards">
-        <div class="card"><div class="muted">Total Hak + Penyesuaian</div><div class="metric">${totalEntitlement}</div><div class="muted">hari</div></div>
-        <div class="card"><div class="muted">Sudah Digunakan</div><div class="metric">${totalUsed}</div><div class="muted">hari</div></div>
-        <div class="card"><div class="muted">Sedang Diajukan</div><div class="metric">${totalPending}</div><div class="muted">hari</div></div>
-        <div class="card"><div class="muted">Sisa Tersedia</div><div class="metric">${totalAvailable}</div><div class="muted">hari</div></div>
-      </div>
-
-      <div class="cards" style="margin-top:12px">
-        <div class="card"><div class="muted">Cuti Desember Disetujui</div><div class="metric">${decemberApproved}</div><div class="muted">hari kerja</div></div>
-        <div class="card"><div class="muted">Cuti Desember Pending</div><div class="metric">${decemberPending}</div><div class="muted">hari kerja</div></div>
-        <div class="card"><div class="muted">Saldo Hangus</div><div class="metric">${totalForfeited}</div><div class="muted">hari</div></div>
-        <div class="card"><div class="muted">Validasi > 3 Hari Desember</div><div class="metric">${decViolations}</div><div class="muted">pengajuan</div></div>
-      </div>
-
-      <div class="info-box" style="margin-top:14px">
-        <b>Aturan penting:</b> penggunaan Cuti Tahunan di bulan Desember maksimal <b>3 hari kerja</b>.
-        Hari Minggu, libur nasional, dan cuti bersama mengikuti kebijakan kalender/karyawan yang tersimpan di sistem.
-        Cuti yang tersisa sampai penutupan tahun dapat diproses sebagai <b>hangus</b> oleh HR.
-      </div>
-
-      <div class="section-head" style="margin-top:18px">
-        <div>
-          <h3 class="sub-title">Saldo Cuti Tahunan per Karyawan</h3>
-          <div class="muted">Nilai di bawah berasal langsung dari <code>leave_balance_summary</code>.</div>
-        </div>
-        <input id="phase12bBalanceSearch" type="search" placeholder="Cari nama / ID karyawan..." style="min-width:250px">
-      </div>
-
-      <div class="table-wrap" id="phase12bBalanceTable">
-        ${rows.length ? `
-        <table class="table">
-          <thead><tr>
-            <th>Karyawan</th><th>Hak</th><th>Terpakai</th><th>Pending</th><th>Hangus</th><th>Sisa</th>
-          </tr></thead>
-          <tbody id="phase12bBalanceBody">
-            ${rows.map(r => `<tr>
-              <td><b>${esc(r.full_name || phase12bEmployeeName(r.employee_id))}</b><div class="muted">${esc(r.employee_number || '-')}</div></td>
-              <td>${Number(r.entitlement_days || 0) + Number(r.adjustment_days || 0)}</td>
-              <td>${Number(r.used_days || 0)}</td>
-              <td>${Number(r.pending_days || 0)}</td>
-              <td>${Number(r.forfeited_days || 0)}</td>
-              <td>${phase12bBalanceBadge(r.available_days)}</td>
-            </tr>`).join('')}
-          </tbody>
-        </table>` : '<div class="card empty">Belum ada saldo cuti tahunan untuk tahun ini.</div>'}
-      </div>
-
-      <div class="section-head" style="margin-top:20px">
-        <div>
-          <h3 class="sub-title">Kalender Kebijakan ${year}</h3>
-          <div class="muted">Libur nasional dan cuti bersama yang menjadi dasar perhitungan hari kerja.</div>
-        </div>
-      </div>
-      <div class="table-wrap">
-        ${calendar.length ? `
-        <table class="table">
-          <thead><tr><th>Tanggal</th><th>Nama</th><th>Jenis</th><th>Berlaku</th><th>Catatan</th></tr></thead>
-          <tbody>
-            ${calendar.map(c => `<tr>
-              <td><b>${esc(fmtDate(c.calendar_date))}</b></td>
-              <td>${esc(c.name || '-')}</td>
-              <td>${esc(phase12bCalendarTypeLabel(c.day_type))}</td>
-              <td>${esc(c.applies_to || 'all')}</td>
-              <td>${esc(c.notes || '-')}</td>
-            </tr>`).join('')}
-          </tbody>
-        </table>` : '<div class="card empty">Belum ada kalender kebijakan.</div>'}
-      </div>
-    </div>`;
-}
-
-const __phase12bOriginalLeave = leave;
-leave = async function() {
-  // Render modul Phase 6 terlebih dahulu agar approval SPV/HR tetap utuh.
-  __phase12bOriginalLeave();
-
-  const content = $('#content');
-  if (!content) return;
-  document.getElementById('phase12bPolicyPanel')?.remove();
-
-  const year = new Date().getFullYear();
-  try {
-    const [balances, calendar] = await Promise.all([
-      phase12bLoadBalance(year),
-      phase12bLoadCalendar(year)
-    ]);
-
-    content.insertAdjacentHTML('afterbegin', phase12bEnhancementHtml(balances, calendar, year));
-
-    const search = $('#phase12bBalanceSearch');
-    const body = $('#phase12bBalanceBody');
-    const refresh = $('#phase12bRefresh');
-
-    const redraw = () => {
-      if (!body) return;
-      const q = (search?.value || '').trim().toLowerCase();
-      const activeIds = new Set((state.employees || [])
-        .filter(e => e.employment_status === 'active')
-        .map(e => e.id));
-      const filtered = balances.filter(r =>
-        (activeIds.size === 0 || activeIds.has(r.employee_id)) &&
-        (!q || `${r.full_name || ''} ${r.employee_number || ''}`.toLowerCase().includes(q))
-      );
-      body.innerHTML = filtered.length ? filtered.map(r => `<tr>
-        <td><b>${esc(r.full_name || '-')}</b><div class="muted">${esc(r.employee_number || '-')}</div></td>
-        <td>${Number(r.entitlement_days || 0) + Number(r.adjustment_days || 0)}</td>
-        <td>${Number(r.used_days || 0)}</td>
-        <td>${Number(r.pending_days || 0)}</td>
-        <td>${Number(r.forfeited_days || 0)}</td>
-        <td>${phase12bBalanceBadge(r.available_days)}</td>
-      </tr>`).join('') : '<tr><td colspan="6"><div class="card empty">Karyawan tidak ditemukan.</div></td></tr>';
-    };
-
-    search?.addEventListener('input', redraw);
-    refresh?.addEventListener('click', () => leave());
-  } catch (err) {
-    content.insertAdjacentHTML('afterbegin', `<div class="section" id="phase12bPolicyPanel"><div class="card"><div class="error">Policy Cuti gagal dimuat: ${esc(friendlyError(err))}</div></div></div>`);
-  }
-};
-
-console.log('HR Employee System Phase 12B loaded: Cuti & Izin Policy UI (patch-only)');
-/* =========================================================
-   PHASE 12C — CUTI WORKDAY CALCULATION FIX
-   Menghubungkan form pengajuan Phase 6 ke policy engine Phase 12A.
-   UI harus menampilkan hari kerja, bukan 0 / calendar-day lama.
-   ========================================================= */
-
-async function phase12cWorkdays(employeeId, startDate, endDate) {
+async function phase12cFinalWorkdays(employeeId, startDate, endDate) {
   if (!employeeId || !startDate || !endDate) return 0;
   const r = await sb.rpc('leave_workdays_between', {
     p_employee: employeeId,
@@ -6695,170 +6481,7 @@ async function phase12cWorkdays(employeeId, startDate, endDate) {
   return Number(r.data || 0);
 }
 
-async function phase12cRefreshDays(modal) {
-  const el = modal?.querySelector('#p6Days');
-  if (!el) return;
-  const fd = new FormData(modal);
-  const employeeId = String(fd.get('employee_id') || '');
-  const startDate = String(fd.get('start_date') || '');
-  const endDate = String(fd.get('end_date') || startDate);
-  if (!employeeId || !startDate || !endDate) {
-    el.value = '0 hari';
-    return;
-  }
-  el.value = 'Menghitung...';
-  try {
-    const n = await phase12cWorkdays(employeeId, startDate, endDate);
-    el.value = `${n} hari`;
-  } catch (err) {
-    el.value = 'Gagal dihitung';
-    toast('Gagal menghitung hari kerja: ' + friendlyError(err), 'error');
-  }
-}
-
-/* Replace only the old Phase 6 new-leave form. Approval flow remains unchanged. */
-window.p6NewLeave = function(employeeId = '') {
-  const activeTypes = (state.leaveTypes || []).filter(x => x.is_active);
-  const empList = (state.employees || []).filter(e => e.employment_status === 'active');
-  const body = `<div class="form-grid">
-    <div class="field field-full"><label>Karyawan *</label><select name="employee_id" required>${empList.map(e => `<option value="${esc(e.id)}" ${e.id === employeeId ? 'selected' : ''}>${esc(e.full_name)} — ${esc(e.employee_number || '-')}</option>`).join('')}</select></div>
-    <div class="field"><label>Jenis *</label><select name="leave_type_id" id="p6Type" required>${activeTypes.map(t => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('')}</select></div>
-    <div class="field"><label>Jumlah hari kerja otomatis</label><input id="p6Days" value="0 hari" readonly></div>
-    <div class="field"><label>Tanggal Mulai *</label><input name="start_date" type="date" required></div>
-    <div class="field"><label>Tanggal Berakhir *</label><input name="end_date" type="date" required></div>
-    <div class="field field-full"><label>Alasan *</label><textarea name="reason" rows="4" required placeholder="Tuliskan alasan pengajuan..."></textarea></div>
-    <div class="field field-full"><label>Lampiran</label><input name="attachment" type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"><div class="muted">Wajib untuk jenis yang memerlukan bukti.</div></div>
-  </div>`;
-
-  const modal = openModal('Ajukan Cuti / Izin', body, async form => {
-    const fd = new FormData(form);
-    const employee_id = String(fd.get('employee_id') || '');
-    const leave_type_id = String(fd.get('leave_type_id') || '');
-    const start_date = String(fd.get('start_date') || '');
-    const end_date = String(fd.get('end_date') || start_date);
-    const reason = String(fd.get('reason') || '').trim();
-    const type = p6LeaveType(leave_type_id);
-    if (!employee_id || !leave_type_id || !start_date || !end_date || !reason) {
-      toast('Lengkapi karyawan, jenis, tanggal dan alasan.', 'error'); return false;
-    }
-    if (end_date < start_date) {
-      toast('Tanggal berakhir tidak boleh lebih kecil dari tanggal mulai.', 'error'); return false;
-    }
-
-    let total_days;
-    try {
-      total_days = await phase12cWorkdays(employee_id, start_date, end_date);
-    } catch (err) {
-      toast('Gagal menghitung hari kerja: ' + friendlyError(err), 'error'); return false;
-    }
-    if (total_days <= 0) {
-      toast('Tidak ada hari kerja dalam periode yang dipilih. Silakan pilih tanggal kerja.', 'error'); return false;
-    }
-
-    if (type?.code === PHASE6_LEAVE.annualCode) {
-      const bal = p6BalanceFor(employee_id, leave_type_id, Number(start_date.slice(0, 4)));
-      if (total_days > bal.available) {
-        toast(`Sisa Cuti Tahunan tidak cukup. Tersedia ${bal.available} hari.`, 'error'); return false;
-      }
-    }
-
-    const file = fd.get('attachment');
-    let attachment_path = null;
-    if (file && file.size) {
-      if (file.size > 10 * 1024 * 1024) {
-        toast('Lampiran maksimal 10 MB.', 'error'); return false;
-      }
-      attachment_path = p6AttachmentPath(employee_id, file);
-      const up = await sb.storage.from('leave-documents').upload(
-        attachment_path, file,
-        { upsert: false, contentType: file.type || 'application/octet-stream' }
-      );
-      if (up.error) {
-        toast('Gagal upload lampiran: ' + up.error.message, 'error'); return false;
-      }
-    }
-
-    const payload = {
-      employee_id,
-      leave_type_id,
-      start_date,
-      end_date,
-      total_days,
-      calculated_days: total_days,
-      reason,
-      employee_note: reason,
-      attachment_path,
-      status: 'pending',
-      supervisor_status: 'pending',
-      hr_status: 'pending',
-      submitted_at: new Date().toISOString()
-    };
-
-    const r = await sb.from('leave_requests').insert(payload).select().single();
-    if (r.error) {
-      toast(friendlyError(r.error), 'error'); return false;
-    }
-    toast(`Pengajuan berhasil dikirim (${total_days} hari kerja).`);
-    await p6RefreshLeaveData();
-    leave();
-    return true;
-  }, 'Kirim Pengajuan');
-
-  const recalc = () => phase12cRefreshDays(modal);
-  modal.querySelectorAll('[name="start_date"],[name="end_date"],[name="employee_id"]')
-    .forEach(x => x.addEventListener('change', recalc));
-};
-
-console.log('HR Employee System Phase 12C loaded: Leave Workday Calculation + Policy Validation');
-/* =========================================================
-   PHASE 12C FINAL PATCH — CUTI WORKDAY FORM
-   Dipasang PALING BAWAH app.js.
-   Tidak mengubah SQL / approval flow.
-   ========================================================= */
-
-async function phase12cWorkdays(employeeId, startDate, endDate) {
-  if (!employeeId || !startDate || !endDate) return 0;
-  const r = await sb.rpc('leave_workdays_between', {
-    p_employee: employeeId,
-    p_start: startDate,
-    p_end: endDate
-  });
-  if (r.error) throw r.error;
-  return Number(r.data || 0);
-}
-
-async function phase12cRefreshDaysFinal(form) {
-  const el = form?.querySelector('#phase12cDays');
-  if (!el) return;
-
-  const fd = new FormData(form);
-  const employeeId = String(fd.get('employee_id') || '');
-  const startDate = String(fd.get('start_date') || '');
-  const endDate = String(fd.get('end_date') || startDate);
-
-  if (!employeeId || !startDate || !endDate) {
-    el.value = '0 hari';
-    return;
-  }
-
-  if (endDate < startDate) {
-    el.value = 'Tanggal tidak valid';
-    return;
-  }
-
-  el.value = 'Menghitung...';
-
-  try {
-    const n = await phase12cWorkdays(employeeId, startDate, endDate);
-    el.value = `${n} hari`;
-  } catch (err) {
-    console.error('Phase 12C workday calculation:', err);
-    el.value = 'Gagal dihitung';
-    toast('Gagal menghitung hari kerja: ' + friendlyError(err), 'error');
-  }
-}
-
-async function phase12cSubmitLeaveFinal(form) {
+async function phase12cFinalSubmit(form) {
   if (!(form instanceof HTMLFormElement)) {
     throw new Error('Form pengajuan cuti tidak valid.');
   }
@@ -6869,7 +6492,10 @@ async function phase12cSubmitLeaveFinal(form) {
   const start_date = String(fd.get('start_date') || '');
   const end_date = String(fd.get('end_date') || start_date);
   const reason = String(fd.get('reason') || '').trim();
-  const type = typeof p6LeaveType === 'function' ? p6LeaveType(leave_type_id) : null;
+
+  const type = typeof p6LeaveType === 'function'
+    ? p6LeaveType(leave_type_id)
+    : null;
 
   if (!employee_id || !leave_type_id || !start_date || !end_date || !reason) {
     toast('Lengkapi karyawan, jenis, tanggal dan alasan.', 'error');
@@ -6881,25 +6507,50 @@ async function phase12cSubmitLeaveFinal(form) {
     return false;
   }
 
+  if (type?.requires_attachment) {
+    const file = fd.get('attachment');
+    if (!file || !file.size) {
+      toast('Lampiran wajib untuk jenis pengajuan ini.', 'error');
+      return false;
+    }
+  }
+
   let total_days;
   try {
-    total_days = await phase12cWorkdays(employee_id, start_date, end_date);
+    total_days = await phase12cFinalWorkdays(
+      employee_id,
+      start_date,
+      end_date
+    );
   } catch (err) {
+    console.error('Phase 12C workday error:', err);
     toast('Gagal menghitung hari kerja: ' + friendlyError(err), 'error');
     return false;
   }
 
   if (total_days <= 0) {
-    toast('Tidak ada hari kerja dalam periode yang dipilih. Silakan pilih tanggal kerja.', 'error');
+    toast(
+      'Tidak ada hari kerja dalam periode yang dipilih. Silakan pilih tanggal kerja.',
+      'error'
+    );
     return false;
   }
 
-  /* Cek saldo awal di UI untuk Cuti Tahunan.
-     Validasi final tetap dilakukan oleh trigger Phase 12A di database. */
-  if (type?.code === PHASE6_LEAVE.annualCode && typeof p6BalanceFor === 'function') {
-    const bal = p6BalanceFor(employee_id, leave_type_id, Number(start_date.slice(0, 4)));
+  if (
+    type?.code === PHASE6_LEAVE.annualCode &&
+    typeof p6BalanceFor === 'function'
+  ) {
+    const bal = p6BalanceFor(
+      employee_id,
+      leave_type_id,
+      Number(start_date.slice(0, 4))
+    );
+
     if (total_days > Number(bal?.available || 0)) {
-      toast(`Sisa Cuti Tahunan tidak cukup. Tersedia ${bal.available} hari.`, 'error');
+      toast(
+        `Sisa Cuti Tahunan tidak cukup. Tersedia ${bal.available} hari.`,
+        'error'
+      );
       return false;
     }
   }
@@ -6970,14 +6621,10 @@ async function phase12cSubmitLeaveFinal(form) {
     await p6RefreshLeaveData();
   }
 
-  if (typeof leave === 'function') {
-    await leave();
-  }
-
   return true;
 }
 
-/* Override FINAL — harus berada paling bawah app.js */
+/* Override p6NewLeave LAST so no later Phase can replace it. */
 window.p6NewLeave = function(employeeId = '') {
   const activeTypes = (state.leaveTypes || []).filter(x => x.is_active);
   const empList = (state.employees || []).filter(
@@ -6999,7 +6646,7 @@ window.p6NewLeave = function(employeeId = '') {
 
       <div class="field">
         <label>Jenis *</label>
-        <select name="leave_type_id" id="phase12cType" required>
+        <select name="leave_type_id" id="phase12cFinalType" required>
           ${activeTypes.map(t => `
             <option value="${esc(t.id)}">
               ${esc(t.name)}
@@ -7010,7 +6657,7 @@ window.p6NewLeave = function(employeeId = '') {
 
       <div class="field">
         <label>Jumlah hari kerja otomatis</label>
-        <input id="phase12cDays" value="0 hari" readonly>
+        <input id="phase12cFinalDays" value="0 hari" readonly>
       </div>
 
       <div class="field">
@@ -7025,13 +6672,21 @@ window.p6NewLeave = function(employeeId = '') {
 
       <div class="field field-full">
         <label>Alasan *</label>
-        <textarea name="reason" rows="4" required
-          placeholder="Tuliskan alasan pengajuan..."></textarea>
+        <textarea
+          name="reason"
+          rows="4"
+          required
+          placeholder="Tuliskan alasan pengajuan..."
+        ></textarea>
       </div>
 
       <div class="field field-full">
         <label>Lampiran</label>
-        <input name="attachment" type="file">
+        <input
+          name="attachment"
+          type="file"
+          accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+        >
         <div class="muted">Wajib untuk jenis yang memerlukan bukti.</div>
       </div>
     </div>
@@ -7040,37 +6695,56 @@ window.p6NewLeave = function(employeeId = '') {
   const modal = openModal(
     'Ajukan Cuti / Izin',
     body,
-    async form => {
-      return await phase12cSubmitLeaveFinal(form);
-    },
+    async form => await phase12cFinalSubmit(form),
     'Kirim Pengajuan'
   );
 
-  if (!modal) return;
+  const form = modal.querySelector('form');
+  const daysEl = modal.querySelector('#phase12cFinalDays');
 
-  const recalc = () => {
-    const form = modal instanceof HTMLFormElement
-      ? modal
-      : modal.querySelector('form');
+  const recalc = async () => {
+    const fd = new FormData(form);
+    const emp = String(fd.get('employee_id') || '');
+    const start = String(fd.get('start_date') || '');
+    const end = String(fd.get('end_date') || start);
 
-    if (form) {
-      phase12cRefreshDaysFinal(form);
+    if (!emp || !start || !end) {
+      daysEl.value = '0 hari';
+      return;
+    }
+
+    if (end < start) {
+      daysEl.value = 'Tanggal tidak valid';
+      return;
+    }
+
+    daysEl.value = 'Menghitung...';
+
+    try {
+      const n = await phase12cFinalWorkdays(emp, start, end);
+      daysEl.value = `${n} hari`;
+    } catch (err) {
+      console.error('Phase 12C calculation:', err);
+      daysEl.value = 'Gagal dihitung';
+      toast(
+        'Gagal menghitung hari kerja: ' + friendlyError(err),
+        'error'
+      );
     }
   };
 
-  const form = modal instanceof HTMLFormElement
-    ? modal
-    : modal.querySelector('form');
+  form.querySelectorAll(
+    '[name="employee_id"], [name="start_date"], [name="end_date"]'
+  ).forEach(el => {
+    el.addEventListener('change', recalc);
+  });
 
-  if (form) {
-    form.querySelectorAll(
-      '[name="start_date"], [name="end_date"], [name="employee_id"]'
-    ).forEach(input => {
-      input.addEventListener('change', recalc);
-    });
-  }
+  console.log(
+    'PHASE 12C FINAL — p6NewLeave override active',
+    'employee=', employeeId
+  );
 };
 
 console.log(
-  'PHASE 12C FINAL PATCH loaded — p6NewLeave uses leave_workdays_between'
+  'PHASE 12C FINAL LOADED — CUTI USES leave_workdays_between'
 );
