@@ -6353,7 +6353,10 @@ function phase9Summary(rows) {
 async function phase9RenderHistory(box, from, to) {
   box.innerHTML = `<div class="section"><div class="card empty">Memuat riwayat absensi...</div></div>`;
   try {
-    const rows = await phase9LoadHistory(from, to) || [];
+    const historyResult = await phase9LoadHistory(from, to);
+    const rows = Array.isArray(historyResult)
+      ? historyResult
+      : (Array.isArray(historyResult?.rows) ? historyResult.rows : []);
     const s = phase9Summary(rows);
 
     box.innerHTML = `
@@ -6448,7 +6451,7 @@ async function phase9RenderHistory(box, from, to) {
 
 // Re-wrap attendance so the existing Phase 8A panel remains intact,
 // then append the employee's private attendance history below it.
-const __phase9AttendanceView = __phase9OriginalEmployeePortalView;
+const __phase9AttendanceView = __phase8aEmployeePortalView;
 employeePortalView = async function(view) {
   if (view !== 'attendance') return await __phase9AttendanceView(view);
   const box = $('#epContent');
