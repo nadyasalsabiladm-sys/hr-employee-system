@@ -6576,11 +6576,26 @@ function phase11cContractAlertHtml() {
     </div>`;
 }
 
-dashboard = function() {
-  __phase11cOriginalDashboard();
+/* PHASE 11C FINAL — hook renderApp after every full page render.
+   This is safer than wrapping dashboard because Phase 7/10 also wrap renderApp.
+*/
+const __phase11cOriginalRenderApp = renderApp;
+renderApp = function() {
+  __phase11cOriginalRenderApp();
+  if (state.view !== 'dashboard') return;
   const content = $('#content');
   if (!content) return;
-  content.insertAdjacentHTML('beforeend', phase11cContractAlertHtml());
+  const old = document.getElementById('phase11cContractAlerts');
+  if (old) old.remove();
+  try {
+    content.insertAdjacentHTML('beforeend', phase11cContractAlertHtml());
+    console.info('PHASE 11C ACTIVE — Alert Kontrak dirender setelah renderApp', {
+      contracts: Array.isArray(state.contracts) ? state.contracts.length : 0,
+      element: !!document.getElementById('phase11cContractAlerts')
+    });
+  } catch (err) {
+    console.error('PHASE 11C RENDER ERROR:', err);
+  }
 };
 
-console.log('HR Employee System Phase 11C loaded: Dashboard Contract Alerts (patch-only)');
+console.log('HR Employee System Phase 11C FINAL loaded: Dashboard Contract Alerts via renderApp');
