@@ -6448,7 +6448,7 @@ async function phase9RenderHistory(box, from, to) {
 
 // Re-wrap attendance so the existing Phase 8A panel remains intact,
 // then append the employee's private attendance history below it.
-const __phase9AttendanceView = __phase9OriginalEmployeePortalView;
+const __phase9AttendanceView = employeePortalView;
 employeePortalView = async function(view) {
   if (view !== 'attendance') return await __phase9AttendanceView(view);
   const box = $('#epContent');
