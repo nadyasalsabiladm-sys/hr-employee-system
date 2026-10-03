@@ -6353,10 +6353,7 @@ function phase9Summary(rows) {
 async function phase9RenderHistory(box, from, to) {
   box.innerHTML = `<div class="section"><div class="card empty">Memuat riwayat absensi...</div></div>`;
   try {
-    const historyResult = await phase9LoadHistory(from, to);
-    const rows = Array.isArray(historyResult)
-      ? historyResult
-      : (Array.isArray(historyResult?.rows) ? historyResult.rows : []);
+    const rows = await phase9LoadHistory(from, to) || [];
     const s = phase9Summary(rows);
 
     box.innerHTML = `
@@ -6451,7 +6448,7 @@ async function phase9RenderHistory(box, from, to) {
 
 // Re-wrap attendance so the existing Phase 8A panel remains intact,
 // then append the employee's private attendance history below it.
-const __phase9AttendanceView = __phase8aEmployeePortalView;
+const __phase9AttendanceView = __phase9OriginalEmployeePortalView;
 employeePortalView = async function(view) {
   if (view !== 'attendance') return await __phase9AttendanceView(view);
   const box = $('#epContent');
@@ -6467,3 +6464,123 @@ employeePortalView = async function(view) {
 };
 
 console.log('HR Employee System Phase 9 loaded: Employee Attendance History + Summary');
+
+
+/* =========================================================
+   PHASE 11C — DASHBOARD ALERT KONTRAK
+   PATCH-ONLY: tidak mengganti dashboard lama.
+   Dashboard lama tetap tampil, lalu bagian alert ditambahkan
+   di bawahnya. Semua Phase 7, 8A, 9, dan 10 dipertahankan.
+   ========================================================= */
+
+const __phase11cOriginalDashboard = dashboard;
+
+function phase11cContractAlertHtml() {
+  const rows = (state.contracts || []).map(c => {
+    const e = (state.employees || []).find(x => x.id === c.employee_id);
+    const days = daysUntil(c.end_date);
+    let level = 'normal';
+    let label = 'Belum mendekati jatuh tempo';
+
+    if (c.status === 'expired' || (days !== null && days < 0)) {
+      level = 'expired';
+      label = 'Sudah Berakhir';
+    } else if (c.status === 'active' && days !== null && days <= 30) {
+      level = 'critical';
+      label = '≤ 30 Hari';
+    } else if (c.status === 'active' && days !== null && days <= 90) {
+      level = 'warning';
+      label = '31–90 Hari';
+    }
+
+    return { c, e, days, level, label };
+  }).filter(x => x.level !== 'normal')
+    .sort((a,b) => {
+      const order = {expired:1, critical:2, warning:3};
+      return (order[a.level] - order[b.level]) ||
+        ((a.days ?? 999999) - (b.days ?? 999999));
+    });
+
+  const expired = rows.filter(x => x.level === 'expired').length;
+  const critical = rows.filter(x => x.level === 'critical').length;
+  const warning = rows.filter(x => x.level === 'warning').length;
+
+  return `
+    <div class="section" id="phase11cContractAlerts">
+      <div class="section-head">
+        <div>
+          <h2>⚠️ Alert Kontrak</h2>
+          <div class="muted">Kontrak yang memerlukan perhatian HR</div>
+        </div>
+        <button class="btn btn-light" onclick="gotoView('contracts')">Buka Kontrak</button>
+      </div>
+
+      <div class="cards">
+        <div class="card">
+          <div class="muted">Sudah Berakhir</div>
+          <div class="metric">${expired}</div>
+        </div>
+        <div class="card">
+          <div class="muted">Berakhir ≤ 30 Hari</div>
+          <div class="metric">${critical}</div>
+        </div>
+        <div class="card">
+          <div class="muted">Berakhir 31–90 Hari</div>
+          <div class="metric">${warning}</div>
+        </div>
+      </div>
+
+      ${rows.length ? `
+        <div class="table-wrap" style="margin-top:14px">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Karyawan</th>
+                <th>No. Dokumen</th>
+                <th>Jenis</th>
+                <th>Berakhir</th>
+                <th>Status Alert</th>
+                <th>Aksi</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows.map(x => `
+                <tr>
+                  <td>
+                    <b>${esc(x.e?.full_name || '-')}</b>
+                    <div class="muted">${esc(x.e?.employee_number || '')}</div>
+                  </td>
+                  <td>${esc(x.c.contract_number || '-')}</td>
+                  <td>${esc(contractTypeLabel(x.c.contract_type))}</td>
+                  <td>${fmtDate(x.c.end_date)}</td>
+                  <td>
+                    <span class="badge ${
+                      x.level === 'expired' ? 'badge-red' :
+                      x.level === 'critical' ? 'badge-yellow' : 'badge-blue'
+                    }">${esc(x.label)}</span>
+                  </td>
+                  <td>
+                    <button class="btn btn-light btn-sm"
+                      onclick="gotoView('contracts')">Buka</button>
+                  </td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      ` : `
+        <div class="card empty" style="margin-top:14px">
+          Tidak ada kontrak yang masuk daftar alert saat ini.
+        </div>
+      `}
+    </div>`;
+}
+
+dashboard = function() {
+  __phase11cOriginalDashboard();
+  const content = $('#content');
+  if (!content) return;
+  content.insertAdjacentHTML('beforeend', phase11cContractAlertHtml());
+};
+
+console.log('HR Employee System Phase 11C loaded: Dashboard Contract Alerts (patch-only)');
