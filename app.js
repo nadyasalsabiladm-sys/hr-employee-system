@@ -6678,3 +6678,135 @@ leave = async function() {
 };
 
 console.log('HR Employee System Phase 12B loaded: Cuti & Izin Policy UI (patch-only)');
+/* =========================================================
+   PHASE 12C — CUTI WORKDAY CALCULATION FIX
+   Menghubungkan form pengajuan Phase 6 ke policy engine Phase 12A.
+   UI harus menampilkan hari kerja, bukan 0 / calendar-day lama.
+   ========================================================= */
+
+async function phase12cWorkdays(employeeId, startDate, endDate) {
+  if (!employeeId || !startDate || !endDate) return 0;
+  const r = await sb.rpc('leave_workdays_between', {
+    p_employee: employeeId,
+    p_start: startDate,
+    p_end: endDate
+  });
+  if (r.error) throw r.error;
+  return Number(r.data || 0);
+}
+
+async function phase12cRefreshDays(modal) {
+  const el = modal?.querySelector('#p6Days');
+  if (!el) return;
+  const fd = new FormData(modal);
+  const employeeId = String(fd.get('employee_id') || '');
+  const startDate = String(fd.get('start_date') || '');
+  const endDate = String(fd.get('end_date') || startDate);
+  if (!employeeId || !startDate || !endDate) {
+    el.value = '0 hari';
+    return;
+  }
+  el.value = 'Menghitung...';
+  try {
+    const n = await phase12cWorkdays(employeeId, startDate, endDate);
+    el.value = `${n} hari`;
+  } catch (err) {
+    el.value = 'Gagal dihitung';
+    toast('Gagal menghitung hari kerja: ' + friendlyError(err), 'error');
+  }
+}
+
+/* Replace only the old Phase 6 new-leave form. Approval flow remains unchanged. */
+window.p6NewLeave = function(employeeId = '') {
+  const activeTypes = (state.leaveTypes || []).filter(x => x.is_active);
+  const empList = (state.employees || []).filter(e => e.employment_status === 'active');
+  const body = `<div class="form-grid">
+    <div class="field field-full"><label>Karyawan *</label><select name="employee_id" required>${empList.map(e => `<option value="${esc(e.id)}" ${e.id === employeeId ? 'selected' : ''}>${esc(e.full_name)} — ${esc(e.employee_number || '-')}</option>`).join('')}</select></div>
+    <div class="field"><label>Jenis *</label><select name="leave_type_id" id="p6Type" required>${activeTypes.map(t => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('')}</select></div>
+    <div class="field"><label>Jumlah hari kerja otomatis</label><input id="p6Days" value="0 hari" readonly></div>
+    <div class="field"><label>Tanggal Mulai *</label><input name="start_date" type="date" required></div>
+    <div class="field"><label>Tanggal Berakhir *</label><input name="end_date" type="date" required></div>
+    <div class="field field-full"><label>Alasan *</label><textarea name="reason" rows="4" required placeholder="Tuliskan alasan pengajuan..."></textarea></div>
+    <div class="field field-full"><label>Lampiran</label><input name="attachment" type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"><div class="muted">Wajib untuk jenis yang memerlukan bukti.</div></div>
+  </div>`;
+
+  const modal = openModal('Ajukan Cuti / Izin', body, async form => {
+    const fd = new FormData(form);
+    const employee_id = String(fd.get('employee_id') || '');
+    const leave_type_id = String(fd.get('leave_type_id') || '');
+    const start_date = String(fd.get('start_date') || '');
+    const end_date = String(fd.get('end_date') || start_date);
+    const reason = String(fd.get('reason') || '').trim();
+    const type = p6LeaveType(leave_type_id);
+    if (!employee_id || !leave_type_id || !start_date || !end_date || !reason) {
+      toast('Lengkapi karyawan, jenis, tanggal dan alasan.', 'error'); return false;
+    }
+    if (end_date < start_date) {
+      toast('Tanggal berakhir tidak boleh lebih kecil dari tanggal mulai.', 'error'); return false;
+    }
+
+    let total_days;
+    try {
+      total_days = await phase12cWorkdays(employee_id, start_date, end_date);
+    } catch (err) {
+      toast('Gagal menghitung hari kerja: ' + friendlyError(err), 'error'); return false;
+    }
+    if (total_days <= 0) {
+      toast('Tidak ada hari kerja dalam periode yang dipilih. Silakan pilih tanggal kerja.', 'error'); return false;
+    }
+
+    if (type?.code === PHASE6_LEAVE.annualCode) {
+      const bal = p6BalanceFor(employee_id, leave_type_id, Number(start_date.slice(0, 4)));
+      if (total_days > bal.available) {
+        toast(`Sisa Cuti Tahunan tidak cukup. Tersedia ${bal.available} hari.`, 'error'); return false;
+      }
+    }
+
+    const file = fd.get('attachment');
+    let attachment_path = null;
+    if (file && file.size) {
+      if (file.size > 10 * 1024 * 1024) {
+        toast('Lampiran maksimal 10 MB.', 'error'); return false;
+      }
+      attachment_path = p6AttachmentPath(employee_id, file);
+      const up = await sb.storage.from('leave-documents').upload(
+        attachment_path, file,
+        { upsert: false, contentType: file.type || 'application/octet-stream' }
+      );
+      if (up.error) {
+        toast('Gagal upload lampiran: ' + up.error.message, 'error'); return false;
+      }
+    }
+
+    const payload = {
+      employee_id,
+      leave_type_id,
+      start_date,
+      end_date,
+      total_days,
+      calculated_days: total_days,
+      reason,
+      employee_note: reason,
+      attachment_path,
+      status: 'pending',
+      supervisor_status: 'pending',
+      hr_status: 'pending',
+      submitted_at: new Date().toISOString()
+    };
+
+    const r = await sb.from('leave_requests').insert(payload).select().single();
+    if (r.error) {
+      toast(friendlyError(r.error), 'error'); return false;
+    }
+    toast(`Pengajuan berhasil dikirim (${total_days} hari kerja).`);
+    await p6RefreshLeaveData();
+    leave();
+    return true;
+  }, 'Kirim Pengajuan');
+
+  const recalc = () => phase12cRefreshDays(modal);
+  modal.querySelectorAll('[name="start_date"],[name="end_date"],[name="employee_id"]')
+    .forEach(x => x.addEventListener('change', recalc));
+};
+
+console.log('HR Employee System Phase 12C loaded: Leave Workday Calculation + Policy Validation');
