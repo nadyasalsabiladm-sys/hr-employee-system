@@ -6468,17 +6468,24 @@ console.log('HR Employee System Phase 9 loaded: Employee Attendance History + Su
 
 /* =========================================================
    PHASE 11C — DASHBOARD ALERT KONTRAK
-   PATCH-ONLY: tidak mengganti dashboard lama.
-   Dashboard lama tetap tampil, lalu bagian alert ditambahkan
-   di bawahnya. Semua Phase 7, 8A, 9, dan 10 dipertahankan.
+   FIXED: defensive direct dashboard wrapper.
    ========================================================= */
 
 const __phase11cOriginalDashboard = dashboard;
 
 function phase11cContractAlertHtml() {
-  const rows = (state.contracts || []).map(c => {
-    const e = (state.employees || []).find(x => x.id === c.employee_id);
-    const days = daysUntil(c.end_date);
+  const contracts = Array.isArray(state.contracts) ? state.contracts : [];
+  const employees = Array.isArray(state.employees) ? state.employees : [];
+
+  const rows = contracts.map(c => {
+    const e = employees.find(x => x.id === c.employee_id);
+    let days = null;
+
+    if (c.end_date) {
+      const end = new Date(c.end_date + 'T00:00:00');
+      days = Math.ceil((end - new Date()) / 86400000);
+    }
+
     let level = 'normal';
     let label = 'Belum mendekati jatuh tempo';
 
@@ -6487,7 +6494,7 @@ function phase11cContractAlertHtml() {
       label = 'Sudah Berakhir';
     } else if (c.status === 'active' && days !== null && days <= 30) {
       level = 'critical';
-      label = '≤ 30 Hari';
+      label = days === 0 ? 'Berakhir Hari Ini' : '≤ 30 Hari';
     } else if (c.status === 'active' && days !== null && days <= 90) {
       level = 'warning';
       label = '31–90 Hari';
@@ -6495,8 +6502,8 @@ function phase11cContractAlertHtml() {
 
     return { c, e, days, level, label };
   }).filter(x => x.level !== 'normal')
-    .sort((a,b) => {
-      const order = {expired:1, critical:2, warning:3};
+    .sort((a, b) => {
+      const order = { expired: 1, critical: 2, warning: 3 };
       return (order[a.level] - order[b.level]) ||
         ((a.days ?? 999999) - (b.days ?? 999999));
     });
@@ -6516,53 +6523,30 @@ function phase11cContractAlertHtml() {
       </div>
 
       <div class="cards">
-        <div class="card">
-          <div class="muted">Sudah Berakhir</div>
-          <div class="metric">${expired}</div>
-        </div>
-        <div class="card">
-          <div class="muted">Berakhir ≤ 30 Hari</div>
-          <div class="metric">${critical}</div>
-        </div>
-        <div class="card">
-          <div class="muted">Berakhir 31–90 Hari</div>
-          <div class="metric">${warning}</div>
-        </div>
+        <div class="card"><div class="muted">Sudah Berakhir</div><div class="metric">${expired}</div></div>
+        <div class="card"><div class="muted">Berakhir ≤ 30 Hari</div><div class="metric">${critical}</div></div>
+        <div class="card"><div class="muted">Berakhir 31–90 Hari</div><div class="metric">${warning}</div></div>
       </div>
 
       ${rows.length ? `
         <div class="table-wrap" style="margin-top:14px">
           <table class="table">
-            <thead>
-              <tr>
-                <th>Karyawan</th>
-                <th>No. Dokumen</th>
-                <th>Jenis</th>
-                <th>Berakhir</th>
-                <th>Status Alert</th>
-                <th>Aksi</th>
-              </tr>
-            </thead>
+            <thead><tr>
+              <th>Karyawan</th><th>No. Dokumen</th><th>Jenis</th>
+              <th>Berakhir</th><th>Status Alert</th><th>Aksi</th>
+            </tr></thead>
             <tbody>
               ${rows.map(x => `
                 <tr>
-                  <td>
-                    <b>${esc(x.e?.full_name || '-')}</b>
-                    <div class="muted">${esc(x.e?.employee_number || '')}</div>
-                  </td>
+                  <td><b>${esc(x.e?.full_name || '-')}</b><div class="muted">${esc(x.e?.employee_number || '')}</div></td>
                   <td>${esc(x.c.contract_number || '-')}</td>
                   <td>${esc(contractTypeLabel(x.c.contract_type))}</td>
                   <td>${fmtDate(x.c.end_date)}</td>
-                  <td>
-                    <span class="badge ${
-                      x.level === 'expired' ? 'badge-red' :
-                      x.level === 'critical' ? 'badge-yellow' : 'badge-blue'
-                    }">${esc(x.label)}</span>
-                  </td>
-                  <td>
-                    <button class="btn btn-light btn-sm"
-                      onclick="gotoView('contracts')">Buka</button>
-                  </td>
+                  <td><span class="badge ${
+                    x.level === 'expired' ? 'badge-red' :
+                    x.level === 'critical' ? 'badge-yellow' : 'badge-blue'
+                  }">${esc(x.label)}</span></td>
+                  <td><button class="btn btn-light btn-sm" onclick="gotoView('contracts')">Buka</button></td>
                 </tr>
               `).join('')}
             </tbody>
@@ -6578,9 +6562,31 @@ function phase11cContractAlertHtml() {
 
 dashboard = function() {
   __phase11cOriginalDashboard();
+
   const content = $('#content');
   if (!content) return;
-  content.insertAdjacentHTML('beforeend', phase11cContractAlertHtml());
+
+  const old = document.getElementById('phase11cContractAlerts');
+  if (old) old.remove();
+
+  try {
+    content.insertAdjacentHTML('beforeend', phase11cContractAlertHtml());
+    console.info(
+      'PHASE 11C ACTIVE — Dashboard Alert Kontrak',
+      'contracts:', Array.isArray(state.contracts) ? state.contracts.length : 0
+    );
+  } catch (err) {
+    console.error('PHASE 11C RENDER ERROR:', err);
+    content.insertAdjacentHTML('beforeend', `
+      <div class="section" id="phase11cContractAlerts">
+        <div class="card">
+          <b>⚠️ Alert Kontrak</b>
+          <div class="error" style="margin-top:8px">
+            Alert kontrak gagal dirender. Buka Console untuk detail error.
+          </div>
+        </div>
+      </div>`);
+  }
 };
 
-console.log('HR Employee System Phase 11C loaded: Dashboard Contract Alerts (patch-only)');
+console.log('HR Employee System Phase 11C FIXED loaded: Dashboard Contract Alerts');
