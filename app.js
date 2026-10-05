@@ -7075,3 +7075,47 @@ console.log(
 
   phase6cEmployeeApprovalFix();
 })();
+/* =========================================================
+   PHASE 6C FINAL — EMPLOYEE PORTAL APPROVAL OVERRIDE
+   Fix: jangan gunakan ep6cMyEmployeeId()/state.profile.
+   Employee Portal sudah punya session/token yang valid.
+   ========================================================= */
+
+(function () {
+  async function phase6cFinalApproval() {
+    try {
+      if (typeof employeePortalView === 'function') {
+        await employeePortalView('approval');
+        return;
+      }
+
+      const box = document.querySelector('#epContent');
+      if (!box) throw new Error('Area Employee Portal tidak ditemukan.');
+
+      box.innerHTML = '<div class="card empty">Memuat approval tim...</div>';
+
+      const rows = await empRpc('employee_supervisor_queue');
+      box.innerHTML = employeeApprovalHtml(rows || []);
+    } catch (err) {
+      const box = document.querySelector('#epContent');
+      if (box) {
+        box.innerHTML =
+          '<div class="card"><div class="error">' +
+          esc(friendlyError(err)) +
+          '</div></div>';
+      }
+      console.error('PHASE 6C FINAL APPROVAL ERROR:', err);
+    }
+  }
+
+  /*
+   * Tombol Approval Tim Phase 6C lama memanggil window.ep6cRenderApproval().
+   * Kita override fungsi tersebut PALING AKHIR agar memakai Employee Portal
+   * session/token, bukan state.profile.
+   */
+  window.ep6cRenderApproval = phase6cFinalApproval;
+
+  console.log(
+    'PHASE 6C FINAL APPROVAL OVERRIDE LOADED — uses Employee Portal session'
+  );
+})();
