@@ -7119,3 +7119,130 @@ console.log(
     'PHASE 6C FINAL APPROVAL OVERRIDE LOADED — uses Employee Portal session'
   );
 })();
+/* =========================================================
+   PHASE 6C FINAL FINAL — APPROVAL BUTTON FIX
+   IMPORTANT:
+   - The live error is from old FIX 4 at app.js:4062.
+   - FIX 4 reads state.profile.employee_id.
+   - Employee Portal uses empPortal + empRpc(token).
+   - This patch removes the old click listeners by CLONING the
+     approval buttons, then calls employeeApproveLeave(), which
+     uses empRpc() and the Employee Portal token.
+   ========================================================= */
+
+(function () {
+  'use strict';
+
+  function phase6cGetRequestId(btn) {
+    const raw =
+      btn.getAttribute('onclick') ||
+      btn.dataset.requestId ||
+      '';
+
+    let m = raw.match(
+      /(?:employeeApproveLeave|ep6cApprove)\(\s*['"]([^'"]+)['"]/
+    );
+
+    if (m) return m[1];
+
+    const row = btn.closest('tr');
+    if (!row) return null;
+
+    const html = row.innerHTML || '';
+    m = html.match(
+      /(?:employeeApproveLeave|ep6cApprove)\(\s*['"]([^'"]+)['"]/
+    );
+
+    return m ? m[1] : null;
+  }
+
+  function phase6cBindFinalApprovalButtons() {
+    document.querySelectorAll('button').forEach(btn => {
+      const label = (btn.textContent || '').trim().toLowerCase();
+
+      if (label !== 'setujui' && label !== 'setujui spv' && label !== 'tolak') {
+        return;
+      }
+
+      if (btn.dataset.phase6cFinalApproval === '1') return;
+
+      const requestId = phase6cGetRequestId(btn);
+      if (!requestId) return;
+
+      /*
+       * CloneNode creates a clean button without the old FIX 4
+       * event listener. This is the critical part.
+       */
+      const clean = btn.cloneNode(true);
+
+      clean.removeAttribute('onclick');
+      clean.dataset.phase6cFinalApproval = '1';
+      clean.dataset.requestId = requestId;
+      clean.disabled = false;
+      clean.style.pointerEvents = 'auto';
+      clean.style.cursor = 'pointer';
+
+      clean.addEventListener('click', async function (e) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+
+        if (typeof employeeApproveLeave !== 'function') {
+          alert('Fungsi approval Employee Portal belum tersedia.');
+          return;
+        }
+
+        clean.disabled = true;
+        const oldText = clean.textContent;
+        clean.textContent = 'Memproses...';
+
+        try {
+          const decision =
+            label === 'tolak' ? 'rejected' : 'approved';
+
+          await employeeApproveLeave(requestId, decision);
+        } catch (err) {
+          console.error(
+            'PHASE 6C FINAL FINAL APPROVAL ERROR:',
+            err
+          );
+
+          if (typeof toast === 'function') {
+            toast(
+              typeof friendlyError === 'function'
+                ? friendlyError(err)
+                : String(err?.message || err),
+              'error'
+            );
+          } else {
+            alert(String(err?.message || err));
+          }
+
+          clean.disabled = false;
+          clean.textContent = oldText;
+        }
+      });
+
+      btn.replaceWith(clean);
+    });
+  }
+
+  phase6cBindFinalApprovalButtons();
+
+  const observer = new MutationObserver(
+    phase6cBindFinalApprovalButtons
+  );
+
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true
+  });
+
+  setInterval(
+    phase6cBindFinalApprovalButtons,
+    500
+  );
+
+  console.log(
+    'PHASE 6C FINAL FINAL LOADED — approval buttons use employeeApproveLeave + empRpc token'
+  );
+})();
