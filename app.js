@@ -7027,3 +7027,51 @@ console.log(
     'PHASE 11C FINAL LOADED — Contract Alert Dashboard restored.'
   );
 })();
+/* =========================================================
+   PHASE 6C FINAL — EMPLOYEE PORTAL APPROVAL FIX
+   Masalah:
+   Phase 6C lama masih menggunakan state.profile.employee_id
+   (jalur Admin/HR), sedangkan Portal Karyawan memakai empPortal.token.
+
+   Fix:
+   - Override window.ep6cRenderApproval agar selalu menggunakan
+     Employee Portal session/token.
+   - Tidak memakai state.profile.
+   - Queue menggunakan employee_supervisor_queue.
+   - Tombol Setujui/Tolak menggunakan employeeApproveLeave().
+   - Tidak mengubah database, login, absensi, atau policy cuti.
+   ========================================================= */
+
+(function () {
+  function phase6cEmployeeApprovalFix() {
+    if (typeof window === 'undefined') return;
+
+    window.ep6cRenderApproval = async function () {
+      try {
+        if (!window.empPortal?.token || !window.empPortal?.employee) {
+          if (typeof toast === 'function') {
+            toast('Sesi Portal Karyawan tidak ditemukan. Silakan login kembali.', 'error');
+          } else {
+            alert('Sesi Portal Karyawan tidak ditemukan. Silakan login kembali.');
+          }
+          return;
+        }
+
+        if (typeof window.employeePortalView !== 'function') {
+          throw new Error('Modul Approval Tim Employee Portal belum dimuat.');
+        }
+
+        await window.employeePortalView('approval');
+      } catch (err) {
+        console.error('PHASE 6C FINAL APPROVAL FIX:', err);
+        const msg = err?.message || String(err);
+        if (typeof toast === 'function') toast('Approval Tim gagal dimuat: ' + msg, 'error');
+        else alert('Approval Tim gagal dimuat: ' + msg);
+      }
+    };
+
+    console.log('PHASE 6C FINAL APPROVAL FIX loaded — Employee Portal token/session');
+  }
+
+  phase6cEmployeeApprovalFix();
+})();
