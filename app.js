@@ -7246,3 +7246,263 @@ console.log(
     'PHASE 6C FINAL FINAL LOADED — approval buttons use employeeApproveLeave + empRpc token'
   );
 })();
+/* ============================================================
+   PHASE 13C — GOOGLE CALENDAR REVIEW UI
+   ============================================================
+   Menambahkan review kandidat Google Calendar ke menu Kalender Kerja.
+   Tidak mengganti mesin cuti.
+   - Approve -> approve_google_calendar_candidate(uuid)
+   - Ignore  -> ignore_google_calendar_candidate(uuid)
+   ============================================================ */
+
+(function installPhase13CGoogleCalendarReview() {
+  'use strict';
+
+  if (window.__PHASE13C_GOOGLE_REVIEW__) {
+    console.log('PHASE 13C already loaded.');
+    return;
+  }
+  window.__PHASE13C_GOOGLE_REVIEW__ = true;
+
+  function p13cBadge(status) {
+    const s = String(status || '').toLowerCase();
+    if (s === 'approved') return '<span class="badge badge-green">Disetujui</span>';
+    if (s === 'ignored') return '<span class="badge badge-red">Diabaikan</span>';
+    return '<span class="badge badge-yellow">Menunggu Review</span>';
+  }
+
+  function p13cDayTypeLabel(v) {
+    const x = String(v || '');
+    if (x === 'national_holiday') return 'Libur Nasional';
+    if (x === 'joint_leave') return 'Cuti Bersama';
+    if (x === 'company_holiday') return 'Libur Perusahaan';
+    if (x === 'special_workday') return 'Hari Kerja Khusus';
+    return x ? x : '—';
+  }
+
+  function p13cApplyLabel(v) {
+    const x = String(v || '');
+    if (x === 'all') return 'Semua';
+    if (x === 'office') return 'Office';
+    if (x === 'kitchen') return 'Kitchen';
+    if (x === 'outlet') return 'Outlet';
+    return x || '—';
+  }
+
+  function p13cDate(v) {
+    if (!v) return '—';
+    try {
+      return new Date(String(v) + 'T00:00:00').toLocaleDateString('id-ID');
+    } catch (_) {
+      return String(v);
+    }
+  }
+
+  async function p13cLoad(year) {
+    const { data, error } = await sb
+      .from('hr_calendar_reconciliation')
+      .select('*')
+      .eq('calendar_year', Number(year))
+      .order('holiday_date', { ascending: true })
+      .order('google_name', { ascending: true });
+
+    if (error) throw error;
+    return Array.isArray(data) ? data : [];
+  }
+
+  function p13cRender(rows, year) {
+    const box = document.querySelector('#phase13cGoogleReview');
+    if (!box) return;
+
+    const pending = rows.filter(r => String(r.reconciliation_status) === 'pending');
+    const approved = rows.filter(r => String(r.reconciliation_status) === 'approved');
+    const ignored = rows.filter(r => String(r.reconciliation_status) === 'ignored');
+
+    if (!rows.length) {
+      box.innerHTML = `
+        <div class="card empty">
+          Tidak ada kandidat Google Calendar untuk tahun ${esc(String(year))}.
+        </div>`;
+      return;
+    }
+
+    box.innerHTML = `
+      <div class="card" style="margin-bottom:12px">
+        <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap">
+          <div>
+            <h3 style="margin:0">Review Google Calendar</h3>
+            <div class="muted">
+              Kandidat tidak otomatis menjadi hari libur. HR harus menyetujui terlebih dahulu.
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <span class="badge badge-yellow">Pending ${pending.length}</span>
+            <span class="badge badge-green">Disetujui ${approved.length}</span>
+            <span class="badge badge-red">Diabaikan ${ignored.length}</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Tanggal</th>
+              <th>Event Google</th>
+              <th>Tipe Disarankan</th>
+              <th>Berlaku Untuk</th>
+              <th>Status</th>
+              <th>Aksi</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map(r => {
+              const status = String(r.reconciliation_status || 'pending');
+              const canApprove = status === 'pending' && r.suggested_day_type;
+              const canIgnore = status === 'pending';
+              return `
+                <tr>
+                  <td><b>${esc(p13cDate(r.holiday_date))}</b></td>
+                  <td>
+                    <b>${esc(r.google_name || '-')}</b>
+                    ${r.google_holiday_type ? `<div class="muted">${esc(r.google_holiday_type)}</div>` : ''}
+                  </td>
+                  <td>${esc(p13cDayTypeLabel(r.suggested_day_type))}</td>
+                  <td>${esc(p13cApplyLabel(r.suggested_applies_to))}</td>
+                  <td>${p13cBadge(status)}</td>
+                  <td>
+                    ${canApprove
+                      ? `<button class="btn btn-primary btn-sm" data-p13c-action="approve" data-id="${esc(r.id)}">✓ Setujui</button>`
+                      : ''}
+                    ${canIgnore
+                      ? `<button class="btn btn-light btn-sm" data-p13c-action="ignore" data-id="${esc(r.id)}">Abaikan</button>`
+                      : ''}
+                    ${status === 'pending' && !r.suggested_day_type
+                      ? `<div class="muted" style="margin-top:5px">Tidak ada tipe otomatis — jangan setujui.</div>`
+                      : ''}
+                  </td>
+                </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  async function p13cRefresh(year) {
+    const box = document.querySelector('#phase13cGoogleReview');
+    if (!box) return;
+    box.innerHTML = `<div class="card empty">Memuat kandidat Google Calendar...</div>`;
+
+    try {
+      const rows = await p13cLoad(year);
+      p13cRender(rows, year);
+    } catch (err) {
+      console.error('PHASE 13C load error:', err);
+      box.innerHTML = `
+        <div class="card">
+          <div class="error">${esc(friendlyError(err))}</div>
+        </div>`;
+    }
+  }
+
+  async function p13cAction(id, action, button) {
+    if (!id || !action) return;
+
+    const oldText = button ? button.textContent : '';
+    if (button) {
+      button.disabled = true;
+      button.textContent = 'Memproses...';
+    }
+
+    try {
+      const rpcName = action === 'approve'
+        ? 'approve_google_calendar_candidate'
+        : 'ignore_google_calendar_candidate';
+
+      const { data, error } = await sb.rpc(rpcName, { p_id: id });
+      if (error) throw error;
+
+      toast(
+        action === 'approve'
+          ? 'Tanggal Google Calendar berhasil disetujui dan masuk Kalender Kerja.'
+          : 'Kandidat Google Calendar diabaikan.'
+      );
+
+      const year = Number(document.querySelector('#holidayYear')?.value || holidayCalendarYear || new Date().getFullYear());
+      await p13cRefresh(year);
+
+      /* Refresh kalender utama agar tanggal yang baru disetujui langsung terlihat. */
+      if (action === 'approve' && typeof window.calendarWork === 'function') {
+        /* Hindari rekursi: panggil fungsi asli yang sudah disimpan. */
+        if (typeof window.__phase13cOriginalCalendarWork === 'function') {
+          await window.__phase13cOriginalCalendarWork();
+        }
+        await p13cRefresh(year);
+      }
+
+      return data;
+    } catch (err) {
+      console.error('PHASE 13C action error:', err);
+      toast(friendlyError(err), 'error');
+    } finally {
+      if (button && document.body.contains(button)) {
+        button.disabled = false;
+        button.textContent = oldText;
+      }
+    }
+  }
+
+  async function p13cAttachReview() {
+    const content = document.querySelector('#content');
+    if (!content) return;
+
+    const year = Number(
+      document.querySelector('#holidayYear')?.value ||
+      holidayCalendarYear ||
+      new Date().getFullYear()
+    );
+
+    let box = document.querySelector('#phase13cGoogleReview');
+    if (!box) {
+      content.insertAdjacentHTML('beforeend', `
+        <div class="section" id="phase13cGoogleReviewSection">
+          <div id="phase13cGoogleReview"></div>
+        </div>
+      `);
+      box = document.querySelector('#phase13cGoogleReview');
+    }
+
+    await p13cRefresh(year);
+  }
+
+  /* Simpan calendarWork asli sebelum wrapper. */
+  if (typeof window.calendarWork === 'function' && !window.__phase13cOriginalCalendarWork) {
+    window.__phase13cOriginalCalendarWork = window.calendarWork;
+  }
+
+  /* Wrapper: kalender lama tetap jalan, lalu review Google ditambahkan. */
+  if (typeof window.__phase13cOriginalCalendarWork === 'function') {
+    window.calendarWork = async function() {
+      await window.__phase13cOriginalCalendarWork();
+      await p13cAttachReview();
+    };
+  }
+
+  /* Tombol Approve / Ignore menggunakan event delegation. */
+  document.addEventListener('click', function(event) {
+    const button = event.target.closest('[data-p13c-action][data-id]');
+    if (!button) return;
+
+    event.preventDefault();
+    event.stopImmediatePropagation();
+
+    p13cAction(
+      button.getAttribute('data-id'),
+      button.getAttribute('data-p13c-action'),
+      button
+    );
+  }, true);
+
+  console.log('PHASE 13C LOADED — Google Calendar Review UI');
+})();
