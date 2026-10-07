@@ -7848,52 +7848,6 @@ console.log(
   console.log('PHASE 13D FINAL LOADED — Riwayat Penempatan end_date masa depan = Aktif');
 })();
 /* ============================================================
-   PHASE 13D FINAL v2 — RIWAYAT PENEMPATAN STATUS ROBUST FIX
-   ============================================================
-   Tujuan:
-   - Status Riwayat Penempatan mengikuti masa berlaku.
-   - end_date masih >= hari ini Jakarta => AKTIF
-   - end_date sudah lewat => SELESAI
-   - end_date kosong + is_active !== false => AKTIF
-   - end_date kosong + is_active === false => NONAKTIF
-   - Tidak mengubah database.
-   - Tidak bergantung pada wrapper showEmployeeDetail.
-   ============================================================ */
-(function installPhase13DFinalV2() {
-  'use strict';
-
-  if (window.__PHASE13D_FINAL_V2__) {
-    console.log('PHASE 13D FINAL V2 already loaded.');
-    return;
-  }
-  window.__PHASE13D_FINAL_V2__ = true;
-
-  function todayJakarta() {
-    return new Date().toLocaleDateString('en-CA', {
-      timeZone: 'Asia/Jakarta'
-    });
-  }
-
-  function parseDateText(value) {
-    const s = String(value || '').trim();
-    if (!s || s === '-') return '';
-    // dd/mm/yyyy
-    const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-    if (m) {
-      return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
-    }
-    // yyyy-mm-dd
-    const iso = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
-    if (iso) {
-      return `${iso[1]}-${iso[2].padStart(2, '0')}-${iso[3].padStart(2, '0')}`;
-    }
-    return '';
-  }
-
-  function statusForAssignment(a) {
-    const today = todayJakarta();
-    const end = a && a.end_date ? String(a.end_date).slice(0, 10) : '';
-
     if (end && end >= today) {
       return { label: 'Aktif', cls: 'badge-green' };
     }
