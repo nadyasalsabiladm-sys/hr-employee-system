@@ -7693,6 +7693,13 @@ console.log(
     if (!a) return { label: 'Belum Mulai', cls: 'badge-yellow' };
     if (a.start_date && String(a.start_date) > today) return { label: 'Belum Mulai', cls: 'badge-yellow' };
     if (a.end_date && String(a.end_date) < today) return { label: 'Selesai', cls: 'badge-gray' };
+
+    // Jika masa penempatan masih berlaku sampai hari ini,
+    // status harus AKTIF walaupun flag is_active pada record lama bernilai false.
+    if (a.end_date && String(a.end_date) >= today) {
+      return { label: 'Aktif', cls: 'badge-green' };
+    }
+
     if (a.is_active === false) return { label: 'Nonaktif', cls: 'badge-yellow' };
     return { label: 'Aktif', cls: 'badge-green' };
   }
