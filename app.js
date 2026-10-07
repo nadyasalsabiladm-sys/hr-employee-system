@@ -7748,3 +7748,102 @@ console.log(
   setTimeout(patchOpenDetail, 0);
   console.log('PHASE 13D FIX LOADED — end_date masa depan = Aktif');
 })();
+/* ============================================================
+   PHASE 13D FINAL — RIWAYAT PENEMPATAN STATUS FIX
+   ============================================================
+   Tujuan:
+   - Modal Detail Karyawan -> Riwayat Penempatan harus mengikuti
+     tanggal masa berlaku penempatan.
+   - end_date NULL + is_active != false -> Aktif
+   - end_date masih >= hari ini -> Aktif
+   - end_date sudah lewat -> Selesai
+   - hanya jika tidak aktif dan tidak punya end_date masa depan -> Nonaktif
+
+   Patch-only. Tidak mengubah database.
+   Tempelkan PALING BAWAH app.js.
+   ============================================================ */
+(function installPhase13DFinalRiwayatStatusFix() {
+  'use strict';
+
+  if (window.__PHASE13D_FINAL_RIWAYAT_STATUS_FIX__) {
+    console.log('PHASE 13D FINAL RIWAYAT STATUS already loaded.');
+    return;
+  }
+  window.__PHASE13D_FINAL_RIWAYAT_STATUS_FIX__ = true;
+
+  function todayJakarta() {
+    return new Date().toLocaleDateString('en-CA', {
+      timeZone: 'Asia/Jakarta'
+    });
+  }
+
+  function statusForAssignment(a) {
+    const today = todayJakarta();
+    const end = a && a.end_date ? String(a.end_date).slice(0, 10) : '';
+
+    if (end && end < today) {
+      return { label: 'Selesai', cls: 'badge-gray' };
+    }
+
+    if (end && end >= today) {
+      return { label: 'Aktif', cls: 'badge-green' };
+    }
+
+    if (!a || a.is_active !== false) {
+      return { label: 'Aktif', cls: 'badge-green' };
+    }
+
+    return { label: 'Nonaktif', cls: 'badge-yellow' };
+  }
+
+  function refreshModalStatus(employeeId) {
+    const modal = document.querySelector('#detailModal');
+    if (!modal || !employeeId || !window.state || !Array.isArray(state.assignments)) return;
+
+    const rows = state.assignments
+      .filter(a => a.employee_id === employeeId)
+      .sort((a, b) => String(b.start_date || '').localeCompare(String(a.start_date || '')));
+
+    const bodyRows = modal.querySelectorAll('table tbody tr');
+    if (!bodyRows.length) return;
+
+    bodyRows.forEach((tr, index) => {
+      const assignment = rows[index];
+      if (!assignment) return;
+
+      const cells = tr.querySelectorAll('td');
+      if (cells.length < 4) return;
+
+      const st = statusForAssignment(assignment);
+      const statusCell = cells[3];
+      statusCell.innerHTML = `<span class="badge ${st.cls}">${st.label}</span>`;
+    });
+  }
+
+  if (typeof window.showEmployeeDetail === 'function' && !window.__phase13dOriginalShowEmployeeDetail) {
+    window.__phase13dOriginalShowEmployeeDetail = window.showEmployeeDetail;
+
+    window.showEmployeeDetail = function(employeeId) {
+      const result = window.__phase13dOriginalShowEmployeeDetail(employeeId);
+
+      /* showEmployeeDetail membuat modal secara sinkron. */
+      refreshModalStatus(employeeId);
+      setTimeout(() => refreshModalStatus(employeeId), 0);
+      setTimeout(() => refreshModalStatus(employeeId), 100);
+
+      return result;
+    };
+  }
+
+  /* Jika modal sudah terbuka saat patch dimuat, perbaiki langsung. */
+  const existingModal = document.querySelector('#detailModal');
+  if (existingModal && window.state) {
+    const title = existingModal.querySelector('.section-head h2');
+    const emp = Array.isArray(state.employees)
+      ? state.employees.find(e => e.full_name === title?.textContent?.trim())
+      : null;
+    if (emp) refreshModalStatus(emp.id);
+  }
+
+  console.log('PHASE 13D FINAL LOADED — Riwayat Penempatan end_date masa depan = Aktif');
+})();
