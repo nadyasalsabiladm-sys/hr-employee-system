@@ -7647,3 +7647,104 @@ console.log(
   p13dRefreshIndex();
   console.log('PHASE 13D LOADED — assignment status/current location fixed');
 })();
+/* ============================================================
+   PHASE 13D FIX — ASSIGNMENT STATUS & CURRENT LOCATION
+   ============================================================
+   Perbaikan khusus UI:
+   - Penempatan 01/09/2026 s/d 31/10/2026 pada 07/10/2026 = Aktif.
+   - End date di masa depan TIDAK berarti Nonaktif.
+   - Outlet Saat Ini mengikuti penempatan yang berlaku hari ini.
+   - Riwayat penempatan menentukan status berdasarkan tanggal hari ini.
+   ============================================================ */
+(function installPhase13DFix() {
+  'use strict';
+  if (window.__PHASE13D_FIX__) return;
+  window.__PHASE13D_FIX__ = true;
+
+  function todayJakarta() {
+    return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' });
+  }
+
+  function coversToday(a) {
+    if (!a || a.is_active === false || !a.start_date) return false;
+    const today = todayJakarta();
+    return String(a.start_date) <= today && (!a.end_date || String(a.end_date) >= today);
+  }
+
+  function locationName(a) {
+    if (!a) return '-';
+    if (a.work_location_id) {
+      return a.work_locations?.name || state.workLocations.find(w => w.id === a.work_location_id)?.name || '-';
+    }
+    if (a.branch_id) {
+      return a.branches?.name || state.branches.find(b => b.id === a.branch_id)?.name || '-';
+    }
+    return 'Tidak ada lokasi';
+  }
+
+  function currentAssignment(empId) {
+    return [...(state.assignments || [])]
+      .filter(a => a.employee_id === empId && coversToday(a))
+      .sort((a,b) => String(b.start_date).localeCompare(String(a.start_date)))[0] || null;
+  }
+
+  function status(a) {
+    const today = todayJakarta();
+    if (!a) return { label: 'Belum Mulai', cls: 'badge-yellow' };
+    if (a.start_date && String(a.start_date) > today) return { label: 'Belum Mulai', cls: 'badge-yellow' };
+    if (a.end_date && String(a.end_date) < today) return { label: 'Selesai', cls: 'badge-gray' };
+    if (a.is_active === false) return { label: 'Nonaktif', cls: 'badge-yellow' };
+    return { label: 'Aktif', cls: 'badge-green' };
+  }
+
+  function patchOpenDetail() {
+    const modal = document.getElementById('detailModal');
+    if (!modal) return;
+    const title = modal.querySelector('.section-head h2');
+    if (!title) return;
+    const emp = (state.employees || []).find(e => e.full_name === title.textContent.trim());
+    if (!emp) return;
+
+    const current = currentAssignment(emp.id);
+
+    // Perbarui nilai "Lokasi Saat Ini" di detail-grid.
+    modal.querySelectorAll('.detail-item').forEach(item => {
+      const label = item.querySelector('.muted');
+      if (label && /Lokasi Saat Ini/i.test(label.textContent.trim())) {
+        const value = item.children[1];
+        if (value) value.textContent = locationName(current);
+      }
+    });
+
+    // Perbaiki status setiap baris riwayat penempatan.
+    const assignments = [...(state.assignments || [])]
+      .filter(a => a.employee_id === emp.id)
+      .sort((a,b) => String(b.start_date).localeCompare(String(a.start_date)));
+    const rows = [...modal.querySelectorAll('table tbody tr')];
+    rows.forEach((tr, i) => {
+      const a = assignments[i];
+      if (!a || !tr.children[3]) return;
+      const st = status(a);
+      tr.children[3].innerHTML = `<span class="badge ${st.cls}">${st.label}</span>`;
+    });
+  }
+
+  // Fungsi global untuk kebutuhan komponen lain.
+  window.phase13dCurrentAssignment = currentAssignment;
+  window.phase13dAssignmentStatus = status;
+  window.phase13dLocationName = locationName;
+
+  // Bungkus fungsi detail yang asli; setelah modal dibuat, koreksi tampilan.
+  if (typeof window.showEmployeeDetail === 'function' && !window.__phase13dFixOriginalDetail) {
+    window.__phase13dFixOriginalDetail = window.showEmployeeDetail;
+    window.showEmployeeDetail = function(id) {
+      const result = window.__phase13dFixOriginalDetail(id);
+      setTimeout(patchOpenDetail, 0);
+      return result;
+    };
+  }
+
+  // Jika modal sudah terbuka saat patch dimuat.
+  setTimeout(patchOpenDetail, 0);
+  console.log('PHASE 13D FIX LOADED — end_date masa depan = Aktif');
+})();
