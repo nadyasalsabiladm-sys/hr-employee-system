@@ -7506,3 +7506,144 @@ console.log(
 
   console.log('PHASE 13C LOADED — Google Calendar Review UI');
 })();
+/* ============================================================
+   PHASE 13D — ASSIGNMENT STATUS / CURRENT LOCATION FIX
+   ============================================================
+   Memperbaiki:
+   - Penempatan dengan end_date di masa depan tetap Aktif.
+   - Outlet Saat Ini mengikuti penempatan yang berlaku hari ini.
+   - Riwayat penempatan menampilkan status berdasarkan tanggal hari ini.
+   - Index currentByEmp memakai rentang tanggal, bukan hanya end_date NULL.
+   Patch-only: append ke akhir app.js. Tidak mengganti source lama.
+   ============================================================ */
+(function installPhase13DAssignmentPatch() {
+  'use strict';
+  if (window.__PHASE13D_ASSIGNMENT_PATCH__) {
+    console.log('PHASE 13D already loaded.');
+    return;
+  }
+  window.__PHASE13D_ASSIGNMENT_PATCH__ = true;
+
+  function p13dToday() {
+    return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' });
+  }
+
+  function p13dCoversToday(a) {
+    if (!a || a.is_active === false || !a.start_date) return false;
+    const today = p13dToday();
+    return String(a.start_date) <= today && (!a.end_date || String(a.end_date) >= today);
+  }
+
+  function p13dLocationName(a) {
+    if (!a) return '-';
+    if (a.work_location_id) {
+      return a.work_locations?.name || state.workLocations.find(w => w.id === a.work_location_id)?.name || '-';
+    }
+    if (a.branch_id) {
+      return a.branches?.name || state.branches.find(b => b.id === a.branch_id)?.name || '-';
+    }
+    return 'Tidak ada lokasi';
+  }
+
+  function p13dCurrentAssignment(empId) {
+    return [...(state.assignments || [])]
+      .filter(a => a.employee_id === empId && p13dCoversToday(a))
+      .sort((a, b) => String(b.start_date).localeCompare(String(a.start_date)))[0] || null;
+  }
+
+  function p13dStatus(a) {
+    const today = p13dToday();
+    if (!a) return { label: 'Belum Mulai', cls: 'badge-yellow' };
+    if (a.is_active === false && (!a.end_date || String(a.end_date) >= today)) {
+      return { label: 'Nonaktif', cls: 'badge-yellow' };
+    }
+    if (a.start_date && String(a.start_date) > today) {
+      return { label: 'Belum Mulai', cls: 'badge-yellow' };
+    }
+    if (a.end_date && String(a.end_date) < today) {
+      return { label: 'Selesai', cls: 'badge-gray' };
+    }
+    if (a.is_active !== false) {
+      return { label: 'Aktif', cls: 'badge-green' };
+    }
+    return { label: 'Nonaktif', cls: 'badge-yellow' };
+  }
+
+  // Override global helpers used by the existing employee UI.
+  window.currentOutletName = function(empId) {
+    return p13dLocationName(p13dCurrentAssignment(empId));
+  };
+
+  window.assignmentStatus = function(a) {
+    return p13dStatus(a);
+  };
+
+  // Rebuild the current-placement index using date validity.
+  window.rebuildAssignmentIndex = function() {
+    const idx = {};
+    [...(state.assignments || [])]
+      .filter(p13dCoversToday)
+      .sort((a, b) => String(b.start_date).localeCompare(String(a.start_date)))
+      .forEach(a => {
+        if (!idx[a.employee_id]) idx[a.employee_id] = a;
+      });
+    state.currentByEmp = idx;
+  };
+
+  function p13dRefreshIndex() {
+    try {
+      window.rebuildAssignmentIndex();
+    } catch (err) {
+      console.warn('PHASE 13D index refresh:', err);
+    }
+  }
+
+  // Patch the already-open employee detail modal without replacing the original UI.
+  function p13dRefreshOpenDetail() {
+    const modal = document.querySelector('#detailModal');
+    if (!modal) return;
+
+    const title = modal.querySelector('.section-head h2');
+    if (!title) return;
+    const emp = (state.employees || []).find(e => e.full_name === title.textContent.trim());
+    if (!emp) return;
+
+    const current = p13dCurrentAssignment(emp.id);
+    const items = [...modal.querySelectorAll('.detail-item')];
+    const locationItem = items.find(x => {
+      const label = x.querySelector('.muted');
+      return label && /^(Outlet|Lokasi) Saat Ini$/i.test(label.textContent.trim());
+    });
+    if (locationItem) {
+      const value = locationItem.children[1];
+      if (value) value.textContent = p13dLocationName(current);
+    }
+
+    const assignments = [...(state.assignments || [])]
+      .filter(a => a.employee_id === emp.id)
+      .sort((a, b) => String(b.start_date).localeCompare(String(a.start_date)));
+    const trs = [...modal.querySelectorAll('.table tbody tr')];
+    trs.forEach((tr, i) => {
+      const a = assignments[i];
+      if (!a) return;
+      const cell = tr.children[3];
+      if (!cell) return;
+      const st = p13dStatus(a);
+      cell.innerHTML = `<span class="badge ${st.cls}">${st.label}</span>`;
+    });
+  }
+
+  // Wrap employee detail so the visible modal is corrected immediately.
+  if (typeof window.showEmployeeDetail === 'function' && !window.__phase13dOriginalShowEmployeeDetail) {
+    window.__phase13dOriginalShowEmployeeDetail = window.showEmployeeDetail;
+    window.showEmployeeDetail = function(id) {
+      const result = window.__phase13dOriginalShowEmployeeDetail(id);
+      p13dRefreshIndex();
+      p13dRefreshOpenDetail();
+      return result;
+    };
+  }
+
+  p13dRefreshIndex();
+  console.log('PHASE 13D LOADED — assignment status/current location fixed');
+})();
