@@ -8281,3 +8281,124 @@ console.log(
 
   console.log('PHASE 15F loaded — UI Shift Outlet + OFF');
 })();
+/* ============================================================
+   PHASE 15G — PORTAL JADWAL HARI INI
+   Tambahkan paling bawah app.js setelah Phase 15F.
+   ============================================================ */
+(function () {
+  'use strict';
+
+  async function p15gGetSchedule() {
+    const result = await empRpc('employee_work_schedule_portal', {
+      p_date: todayJakarta()
+    });
+    return result || null;
+  }
+
+  function p15gTime(v) {
+    return v ? String(v).slice(0, 5) : '-';
+  }
+
+  function p15gStatus(status) {
+    const map = {
+      work: ['WORK', 'badge-green'],
+      off: ['OFF', 'badge-gray'],
+      holiday: ['LIBUR', 'badge-yellow'],
+      leave: ['CUTI', 'badge-blue'],
+      sick: ['SAKIT', 'badge-yellow'],
+      absent: ['ABSEN', 'badge-red']
+    };
+    const x = map[status] || [status || '-', 'badge-gray'];
+    return `<span class="badge ${x[1]}">${esc(x[0])}</span>`;
+  }
+
+  function p15gHtml(s) {
+    if (!s || !s.scheduled) {
+      return `
+        <div class="card" id="phase15gSchedule">
+          <div class="section-head">
+            <div>
+              <h3>Jadwal Hari Ini</h3>
+              <div class="muted">Jadwal kerja belum dibuat untuk hari ini.</div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    const isWork = s.schedule_status === 'work';
+
+    return `
+      <div class="card" id="phase15gSchedule">
+        <div class="section-head">
+          <div>
+            <h3>Jadwal Hari Ini</h3>
+            <div class="muted">${esc(s.area || '-')}</div>
+          </div>
+          ${p15gStatus(s.schedule_status)}
+        </div>
+
+        <div class="cards">
+          <div class="card">
+            <div class="muted">Shift</div>
+            <div class="metric" style="font-size:20px">
+              ${esc(s.shift_name || (s.schedule_status === 'off' ? 'OFF' : 'Libur'))}
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="muted">Jam Kerja</div>
+            <div class="metric" style="font-size:20px">
+              ${isWork
+                ? `${esc(p15gTime(s.scheduled_start))}–${esc(p15gTime(s.scheduled_end))}`
+                : '-'}
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="muted">Batas Terlambat</div>
+            <div class="metric" style="font-size:20px">
+              ${isWork ? esc(p15gTime(s.late_after)) : '-'}
+            </div>
+          </div>
+        </div>
+
+        ${s.notes ? `
+          <div class="info-box" style="margin-top:10px">
+            ${esc(s.notes)}
+          </div>
+        ` : ''}
+      </div>
+    `;
+  }
+
+  const __p15gOriginalAttendancePanel = employeeAttendancePanel;
+
+  employeeAttendancePanel = async function (box) {
+    box.innerHTML = '<div class="card empty">Memuat jadwal dan absensi...</div>';
+
+    try {
+      const schedule = await p15gGetSchedule();
+
+      await __p15gOriginalAttendancePanel(box);
+
+      const old = document.getElementById('phase15gSchedule');
+      if (old) old.remove();
+
+      box.insertAdjacentHTML('afterbegin', p15gHtml(schedule));
+    } catch (err) {
+      console.error('Phase 15G:', err);
+      await __p15gOriginalAttendancePanel(box);
+      const old = document.getElementById('phase15gSchedule');
+      if (old) old.remove();
+      box.insertAdjacentHTML(
+        'afterbegin',
+        `<div class="card"><div class="error">
+          Jadwal hari ini belum dapat dimuat.
+        </div></div>`
+      );
+    }
+  };
+
+  console.log('PHASE 15G loaded — Portal Jadwal Hari Ini');
+})();
