@@ -9018,3 +9018,290 @@ console.log(
 
   console.log('PHASE 16 — Tugas Luar (GPS) loaded.');
 })();
+/* ============================================================
+   PHASE 17 — GANTI PIN (Karyawan) + AKSES KARYAWAN (HR)
+   Tambahkan DI PALING BAWAH app.js (di bawah blok Phase 16 bila ada).
+   Membutuhkan SQL Step 7 sudah dijalankan.
+   ============================================================ */
+
+(function () {
+  const TZ = 'Asia/Jakarta';
+
+  const errText = err =>
+    (err && (err.code || /failed to fetch|network/i.test(err.message || '')))
+      ? friendlyError(err)
+      : ((err && err.message) || 'Terjadi kesalahan.');
+
+  /* ---------- Login karyawan: tampilkan pesan dari server ---------- */
+  employeeLogin = async function (employeeNumber, pin) {
+    const { data, error } = await sb.rpc('employee_login', {
+      p_employee_number: String(employeeNumber || '').trim(),
+      p_pin: String(pin || '')
+    });
+    if (error) throw error;
+    if (data && data.error) throw new Error(data.error);
+    if (!data || !data.token) throw new Error('Login karyawan gagal.');
+    empPortal.token = data.token;
+    empPortal.employee = data.employee;
+    empSessionSet({ token: data.token, employee: data.employee });
+    renderEmployeePortal();
+  };
+
+  /* ============================================================
+     PORTAL KARYAWAN: menu Ganti PIN
+     ============================================================ */
+  function renderPin() {
+    const box = $('#epContent');
+    if (!box) return;
+    document.querySelectorAll('.sidebar .nav button').forEach(b => b.classList.toggle('active', b.id === 'p17PinNav'));
+
+    box.innerHTML = `<div class="section">
+      <div class="section-head"><h2>Ganti PIN</h2></div>
+      <div class="info-box">PIN terdiri dari 6–10 angka. Jangan bagikan PIN kepada siapa pun, termasuk atasan atau HR. Setelah PIN diganti, perangkat lain yang sedang login akan keluar otomatis.</div>
+      <form id="p17PinForm" autocomplete="off">
+        <div class="field"><label>PIN lama</label>
+          <input id="p17Old" type="password" inputmode="numeric" maxlength="10" autocomplete="current-password" required></div>
+        <div class="field"><label>PIN baru</label>
+          <input id="p17New" type="password" inputmode="numeric" maxlength="10" autocomplete="new-password" required></div>
+        <div class="field"><label>Ulangi PIN baru</label>
+          <input id="p17New2" type="password" inputmode="numeric" maxlength="10" autocomplete="new-password" required></div>
+        <div id="p17Msg"></div>
+        <button class="btn btn-primary" type="submit">Simpan PIN Baru</button>
+      </form></div>`;
+
+    $('#p17PinForm').onsubmit = async e => {
+      e.preventDefault();
+      const msg = $('#p17Msg');
+      const oldPin = $('#p17Old').value.trim();
+      const newPin = $('#p17New').value.trim();
+      const newPin2 = $('#p17New2').value.trim();
+      const fail = t => { msg.innerHTML = `<div class="error">${esc(t)}</div>`; };
+
+      if (!/^[0-9]{6,10}$/.test(newPin)) return fail('PIN baru harus terdiri dari 6 sampai 10 angka.');
+      if (newPin !== newPin2) return fail('Pengulangan PIN baru tidak sama.');
+      if (newPin === oldPin) return fail('PIN baru tidak boleh sama dengan PIN lama.');
+
+      const btn = e.target.querySelector('button[type="submit"]');
+      btn.disabled = true; btn.textContent = 'Menyimpan...';
+      msg.innerHTML = '';
+      try {
+        const r = await empRpc('employee_change_pin', { p_old_pin: oldPin, p_new_pin: newPin });
+        if (!r || r.ok !== true) { fail((r && r.error) || 'PIN gagal diganti.'); return; }
+        $('#p17Old').value = ''; $('#p17New').value = ''; $('#p17New2').value = '';
+        msg.innerHTML = '<div class="info-box">PIN berhasil diganti. Gunakan PIN baru saat login berikutnya.</div>';
+        toast('PIN berhasil diganti.');
+      } catch (err) {
+        fail(errText(err));
+      } finally {
+        btn.disabled = false; btn.textContent = 'Simpan PIN Baru';
+      }
+    };
+  }
+
+  const __p17OrigPortalView = employeePortalView;
+  employeePortalView = async function (view) {
+    if (view === 'pin') return renderPin();
+    return __p17OrigPortalView(view);
+  };
+
+  const __p17OrigRenderPortal = renderEmployeePortal;
+  renderEmployeePortal = async function () {
+    await __p17OrigRenderPortal();
+    const nav = document.querySelector('.sidebar .nav');
+    if (nav && !document.getElementById('p17PinNav')) {
+      const b = document.createElement('button');
+      b.id = 'p17PinNav'; b.type = 'button'; b.textContent = 'Ganti PIN';
+      b.addEventListener('click', () => employeePortalView('pin'));
+      nav.appendChild(b);
+    }
+  };
+
+  /* ============================================================
+     HR / ADMIN: menu Akses Karyawan
+     ============================================================ */
+  const P = { rows: [], q: '', filter: 'all', reveal: null };
+
+  async function loadRows() {
+    const { data, error } = await sb.rpc('hr_employee_access_list');
+    if (error) throw error;
+    P.rows = data || [];
+  }
+
+  const isLocked = r => !!(r.locked_until && new Date(r.locked_until) > new Date());
+
+  function statusBadge(r) {
+    if (!r.has_access) return '<span class="badge badge-red">Belum punya akses</span>';
+    if (!r.is_active) return '<span class="badge badge-gray">Nonaktif</span>';
+    if (isLocked(r)) return `<span class="badge badge-yellow">Terkunci s.d. ${esc(fmtTime(r.locked_until, TZ))}</span>`;
+    return '<span class="badge badge-green">Aktif</span>';
+  }
+
+  function matches(r) {
+    const q = P.q.trim().toLowerCase();
+    if (q && !(String(r.full_name || '').toLowerCase().includes(q) || String(r.employee_number || '').toLowerCase().includes(q))) return false;
+    if (P.filter === 'missing') return !r.has_access;
+    if (P.filter === 'locked') return r.has_access && isLocked(r);
+    if (P.filter === 'inactive') return r.has_access && !r.is_active;
+    return true;
+  }
+
+  function revealHtml() {
+    const v = P.reveal;
+    if (!v) return '';
+    return `<div class="card" style="border:2px solid #2563eb;margin-bottom:16px">
+      <div><b>${v.created ? 'Akses baru dibuat' : 'PIN direset'}</b> untuk ${esc(v.full_name)}</div>
+      <div class="muted">ID Karyawan: <b>${esc(v.employee_number)}</b></div>
+      <div style="margin:10px 0"><span class="muted">PIN:</span>
+        <span style="font-size:30px;font-family:monospace;letter-spacing:6px;font-weight:700">${esc(v.pin)}</span></div>
+      <div class="muted">PIN hanya ditampilkan sekali ini. Catat atau kirim ke karyawan sekarang, lewat chat pribadi.</div>
+      <div class="row-actions" style="margin-top:10px">
+        <button class="btn btn-primary btn-sm" id="p17Copy">Salin Pesan untuk Karyawan</button>
+        <button class="btn btn-light btn-sm" id="p17CloseReveal">Tutup</button>
+      </div></div>`;
+  }
+
+  function draw() {
+    const box = $('#content');
+    if (!box) return;
+    const all = P.rows;
+    const missing = all.filter(r => !r.has_access).length;
+    const locked = all.filter(r => r.has_access && isLocked(r)).length;
+    const inactive = all.filter(r => r.has_access && !r.is_active).length;
+    const rows = all.filter(matches);
+
+    box.innerHTML = `
+      ${revealHtml()}
+      <div class="cards">
+        <div class="card"><div class="muted">Karyawan aktif</div><div class="metric">${all.length}</div></div>
+        <div class="card"><div class="muted">Belum punya akses</div><div class="metric">${missing}</div></div>
+        <div class="card"><div class="muted">Terkunci</div><div class="metric">${locked}</div></div>
+        <div class="card"><div class="muted">Akses nonaktif</div><div class="metric">${inactive}</div></div>
+      </div>
+      <div class="toolbar">
+        <input id="p17Search" placeholder="Cari nama / ID karyawan..." value="${esc(P.q)}">
+        <select id="p17Filter">
+          <option value="all" ${P.filter === 'all' ? 'selected' : ''}>Semua</option>
+          <option value="missing" ${P.filter === 'missing' ? 'selected' : ''}>Belum punya akses</option>
+          <option value="locked" ${P.filter === 'locked' ? 'selected' : ''}>Terkunci</option>
+          <option value="inactive" ${P.filter === 'inactive' ? 'selected' : ''}>Nonaktif</option>
+        </select>
+        <button class="btn btn-light" id="p17Reload">Muat Ulang</button>
+      </div>
+      <div class="section"><div class="table-wrap"><table class="table">
+        <thead><tr><th>ID Karyawan</th><th>Nama</th><th>Status Akses</th><th>Login Terakhir</th><th>Aksi</th></tr></thead>
+        <tbody>${rows.length ? rows.map(r => `<tr>
+          <td>${esc(r.employee_number)}</td>
+          <td><b>${esc(r.full_name)}</b></td>
+          <td>${statusBadge(r)}</td>
+          <td>${r.last_login_at ? esc(fmtDateTime(r.last_login_at, TZ)) : '-'}</td>
+          <td><div class="row-actions">
+            <button class="btn btn-primary btn-sm" data-p17-reset="${esc(r.employee_id)}">${r.has_access ? 'Reset PIN' : 'Buat PIN'}</button>
+            ${r.has_access ? `<button class="btn btn-light btn-sm" data-p17-toggle="${esc(r.employee_id)}" data-active="${r.is_active ? '1' : '0'}">${r.is_active ? 'Nonaktifkan' : 'Aktifkan'}</button>` : ''}
+          </div></td>
+        </tr>`).join('') : '<tr><td colspan="5" class="muted">Tidak ada data yang cocok.</td></tr>'}</tbody>
+      </table></div></div>`;
+
+    $('#p17Search').oninput = e => { P.q = e.target.value; const pos = e.target.selectionStart; draw(); const s = $('#p17Search'); if (s) { s.focus(); s.setSelectionRange(pos, pos); } };
+    $('#p17Filter').onchange = e => { P.filter = e.target.value; draw(); };
+    $('#p17Reload').onclick = () => renderAccess();
+
+    const cl = $('#p17CloseReveal');
+    if (cl) cl.onclick = () => { P.reveal = null; draw(); };
+    const cp = $('#p17Copy');
+    if (cp) cp.onclick = () => copyMessage(P.reveal);
+
+    box.querySelectorAll('[data-p17-reset]').forEach(b => b.onclick = () => doReset(b.dataset.p17Reset));
+    box.querySelectorAll('[data-p17-toggle]').forEach(b => b.onclick = () => doToggle(b.dataset.p17Toggle, b.dataset.active === '1'));
+  }
+
+  function copyMessage(v) {
+    if (!v) return;
+    const text =
+      `Halo ${v.full_name}, akses Portal Karyawan Anda sudah siap.\n` +
+      `Alamat: ${location.origin}\n` +
+      `ID Karyawan: ${v.employee_number}\n` +
+      `PIN: ${v.pin}\n\n` +
+      `Buka halaman login, pilih "Login Karyawan", lalu segera ganti PIN di menu "Ganti PIN". ` +
+      `Jangan bagikan PIN ini kepada siapa pun.`;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(() => toast('Pesan disalin.'), () => window.prompt('Salin pesan ini:', text));
+    } else {
+      window.prompt('Salin pesan ini:', text);
+    }
+  }
+
+  async function doReset(id) {
+    const r = P.rows.find(x => x.employee_id === id);
+    if (!r) return;
+    const verb = r.has_access ? 'Reset PIN' : 'Buat PIN';
+    const warn = r.has_access ? '\n\nPIN lama tidak berlaku lagi dan perangkat yang sedang login akan keluar.' : '';
+    if (!confirm(`${verb} untuk ${r.full_name} (${r.employee_number})?${warn}`)) return;
+    try {
+      const { data, error } = await sb.rpc('hr_employee_pin_reset', { p_employee: id });
+      if (error) throw error;
+      P.reveal = data;
+      await loadRows();
+      draw();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (err) {
+      toast(friendlyError(err), 'error');
+    }
+  }
+
+  async function doToggle(id, currentlyActive) {
+    const r = P.rows.find(x => x.employee_id === id);
+    if (!r) return;
+    const target = !currentlyActive;
+    if (!confirm(`${target ? 'Aktifkan' : 'Nonaktifkan'} akses portal untuk ${r.full_name}?`)) return;
+    try {
+      const { error } = await sb.rpc('hr_employee_access_set_active', { p_employee: id, p_active: target });
+      if (error) throw error;
+      toast(target ? 'Akses diaktifkan.' : 'Akses dinonaktifkan.');
+      await loadRows();
+      draw();
+    } catch (err) {
+      toast(friendlyError(err), 'error');
+    }
+  }
+
+  async function renderAccess() {
+    const box = $('#content');
+    if (!box) return;
+    box.innerHTML = '<div class="card empty">Memuat data akses...</div>';
+    try { await loadRows(); }
+    catch (err) { box.innerHTML = `<div class="card"><div class="error">${esc(friendlyError(err))}</div></div>`; return; }
+    draw();
+  }
+
+  /* ---------- Hook HR/Admin ---------- */
+  const __p17OrigTitle = title;
+  title = function () {
+    if (state.view === 'access_pin') return 'Akses Karyawan';
+    return __p17OrigTitle();
+  };
+
+  const __p17OrigRenderView = renderView;
+  renderView = function () {
+    if (state.view === 'access_pin') return renderAccess();
+    return __p17OrigRenderView();
+  };
+
+  const __p17OrigRenderApp = renderApp;
+  renderApp = function () {
+    // PIN yang sedang ditampilkan tidak dibawa ke halaman lain
+    if (state.view !== 'access_pin') P.reveal = null;
+    __p17OrigRenderApp();
+    if (!canManageOperationalHR()) return;
+    const nav = document.querySelector('.sidebar .nav');
+    if (!nav || document.getElementById('p17AccessNav')) return;
+    const b = document.createElement('button');
+    b.id = 'p17AccessNav'; b.type = 'button'; b.textContent = 'Akses Karyawan';
+    b.dataset.view = 'access_pin';
+    b.className = state.view === 'access_pin' ? 'active' : '';
+    b.onclick = () => { state.view = 'access_pin'; renderApp(); };
+    const master = [...nav.querySelectorAll('button')].find(x => /Master Data/i.test(x.textContent || ''));
+    if (master) nav.insertBefore(b, master); else nav.appendChild(b);
+  };
+
+  console.log('PHASE 17 — Ganti PIN + Akses Karyawan loaded.');
+})();
