@@ -8402,3 +8402,157 @@ console.log(
 
   console.log('PHASE 15G loaded — Portal Jadwal Hari Ini');
 })();
+/* ============================================================
+   PHASE 15G FIX — PORTAL SCHEDULE + HISTORY NORMALIZER
+   Tambahkan PALING BAWAH app.js setelah Phase 15G.
+   ============================================================ */
+(function(){
+  'use strict';
+
+  function p15gFixNormalizeRows(value){
+    if(Array.isArray(value)) return value;
+    if(Array.isArray(value?.rows)) return value.rows;
+    if(Array.isArray(value?.data)) return value.data;
+    if(Array.isArray(value?.result)) return value.result;
+    return [];
+  }
+
+  function p15gFixTime(v){
+    return v ? String(v).slice(0,5) : '-';
+  }
+
+  function p15gFixStatus(s){
+    const map={
+      work:['WORK','badge-green'],
+      off:['OFF','badge-gray'],
+      holiday:['LIBUR','badge-yellow'],
+      leave:['CUTI','badge-blue'],
+      sick:['SAKIT','badge-yellow'],
+      absent:['ABSEN','badge-red']
+    };
+    const x=map[s]||[s||'-','badge-gray'];
+    return `<span class="badge ${x[1]}">${esc(x[0])}</span>`;
+  }
+
+  async function p15gFixSchedule(){
+    return await empRpc('employee_work_schedule_portal',{
+      p_date:todayJakarta()
+    });
+  }
+
+  function p15gFixScheduleHtml(s){
+    if(!s || !s.scheduled){
+      return `
+        <div class="card" id="phase15gSchedule">
+          <h3>Jadwal Hari Ini</h3>
+          <div class="muted">
+            ${esc(s?.message || 'Jadwal kerja belum dibuat untuk hari ini.')}
+          </div>
+        </div>`;
+    }
+
+    const work=s.schedule_status==='work';
+
+    return `
+      <div class="card" id="phase15gSchedule">
+        <div class="section-head">
+          <div>
+            <h3>Jadwal Hari Ini</h3>
+            <div class="muted">${esc(s.area||'-')}</div>
+          </div>
+          ${p15gFixStatus(s.schedule_status)}
+        </div>
+
+        <div class="cards">
+          <div class="card">
+            <div class="muted">Shift</div>
+            <div class="metric" style="font-size:20px">
+              ${esc(s.shift_name || (s.schedule_status==='off'?'OFF':'Libur'))}
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="muted">Jam Kerja</div>
+            <div class="metric" style="font-size:20px">
+              ${work
+                ? `${esc(p15gFixTime(s.scheduled_start))}–${esc(p15gFixTime(s.scheduled_end))}`
+                : '-'}
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="muted">Batas Terlambat</div>
+            <div class="metric" style="font-size:20px">
+              ${work ? esc(p15gFixTime(s.late_after)) : '-'}
+            </div>
+          </div>
+        </div>
+
+        ${s.notes
+          ? `<div class="info-box" style="margin-top:10px">${esc(s.notes)}</div>`
+          : ''}
+      </div>`;
+  }
+
+  /*
+   * Perbaiki Phase 9:
+   * beberapa versi employee_attendance_history mengembalikan
+   * array langsung, sementara versi tertentu mengembalikan
+   * {rows:[...]} / {data:[...]}. Semuanya dinormalisasi menjadi array.
+   */
+  if(typeof phase9LoadHistory==='function'){
+    const __p15gOldHistory=phase9LoadHistory;
+    phase9LoadHistory=async function(from,to){
+      const raw=await __p15gOldHistory(from,to);
+      return p15gFixNormalizeRows(raw);
+    };
+  }
+
+  if(typeof phase9Summary==='function'){
+    const __p15gOldSummary=phase9Summary;
+    phase9Summary=function(rows){
+      return __p15gOldSummary(p15gFixNormalizeRows(rows));
+    };
+  }
+
+  /*
+   * Wrapper terakhir untuk Absensi Portal.
+   * Tidak mengubah alur selfie/GPS.
+   */
+  const __p15gLastPortalView=employeePortalView;
+
+  employeePortalView=async function(view){
+    if(view!=='attendance'){
+      return await __p15gLastPortalView(view);
+    }
+
+    const box=$('#epContent');
+    if(!box) return;
+
+    try{
+      await __p15gLastPortalView(view);
+
+      const old=document.getElementById('phase15gSchedule');
+      if(old) old.remove();
+
+      const schedule=await p15gFixSchedule();
+      box.insertAdjacentHTML('afterbegin',p15gFixScheduleHtml(schedule));
+
+    }catch(err){
+      console.error('PHASE 15G FIX',err);
+
+      const old=document.getElementById('phase15gSchedule');
+      if(old) old.remove();
+
+      box.insertAdjacentHTML(
+        'afterbegin',
+        `<div class="card" id="phase15gSchedule">
+          <h3>Jadwal Hari Ini</h3>
+          <div class="error">${esc(friendlyError(err))}</div>
+        </div>`
+      );
+    }
+  };
+
+  console.log('PHASE 15G FIX loaded — schedule RPC + history normalization');
+})();
