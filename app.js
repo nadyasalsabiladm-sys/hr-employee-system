@@ -7854,3 +7854,224 @@ console.log(
 
   console.log('PHASE 13D FINAL LOADED — Riwayat Penempatan end_date masa depan = Aktif');
 })();
+/* ============================================================
+   PHASE 15E — ADMIN JADWAL KERJA
+   Append ke app.js yang sedang berjalan.
+   ============================================================ */
+(function(){
+  'use strict';
+
+  state.phase15Schedule = state.phase15Schedule || {
+    from: todayJakarta(),
+    to: todayJakarta(),
+    employee: '',
+    rows: []
+  };
+
+  async function p15eLoad(){
+    const f = state.phase15Schedule;
+    const {data,error} = await sb.rpc('hr_work_schedule_list',{
+      p_from:f.from,p_to:f.to,
+      p_employee:f.employee || null
+    });
+    if(error) throw error;
+    f.rows = data || [];
+    return f.rows;
+  }
+
+  function p15eStatus(s){
+    const m={
+      work:['WORK','badge-green'],
+      off:['OFF','badge-gray'],
+      holiday:['LIBUR','badge-yellow'],
+      leave:['CUTI','badge-blue'],
+      sick:['SAKIT','badge-yellow'],
+      absent:['ABSEN','badge-red']
+    };
+    const x=m[s]||[s||'-','badge-gray'];
+    return `<span class="badge ${x[1]}">${esc(x[0])}</span>`;
+  }
+
+  async function p15eGenerate(emp,from,to){
+    const {data,error}=await sb.rpc('hr_generate_default_schedule',{
+      p_employee:emp,p_from:from,p_to:to
+    });
+    if(error) throw error;
+    return data;
+  }
+
+  async function p15eShift(emp,date,code,notes){
+    const {error}=await sb.rpc('hr_assign_outlet_shift',{
+      p_employee:emp,p_work_date:date,
+      p_shift_code:code,p_notes:notes||null
+    });
+    if(error) throw error;
+  }
+
+  async function p15eOff(emp,date,notes){
+    const {error}=await sb.rpc('hr_set_day_off',{
+      p_employee:emp,p_work_date:date,
+      p_notes:notes||'OFF sesuai jadwal'
+    });
+    if(error) throw error;
+  }
+
+  window.phase15eSchedule = async function(){
+    if(!canManageOperationalHR()){
+      $('#content').innerHTML='<div class="card"><div class="error">Akses hanya untuk Admin/HR.</div></div>';
+      return;
+    }
+
+    const f=state.phase15Schedule;
+    try{ await p15eLoad(); }catch(err){
+      $('#content').innerHTML=`<div class="card"><div class="error">${esc(friendlyError(err))}</div></div>`;
+      return;
+    }
+
+    const active=state.employees
+      .filter(e=>e.employment_status==='active')
+      .sort((a,b)=>String(a.full_name).localeCompare(String(b.full_name)));
+
+    const rows=f.rows.map(r=>`
+      <tr>
+        <td>${esc(r.employee_name)}<div class="muted">${esc(r.employee_number)}</div></td>
+        <td>${fmtDate(r.work_date)}</td>
+        <td>${esc(r.area||'-')}</td>
+        <td>${esc(r.shift_name||'-')}</td>
+        <td>${r.scheduled_start&&r.scheduled_end
+          ? `${esc(String(r.scheduled_start).slice(0,5))}–${esc(String(r.scheduled_end).slice(0,5))}`
+          : '-'}</td>
+        <td>${r.late_after?esc(String(r.late_after).slice(0,5)):'-'}</td>
+        <td>${p15eStatus(r.schedule_status)}</td>
+        <td>${esc(r.branch_name||'-')}</td>
+      </tr>
+    `).join('');
+
+    $('#content').innerHTML=`
+      <div class="section">
+        <div class="section-head">
+          <div>
+            <h2>Jadwal Kerja</h2>
+            <div class="muted">Office, Kitchen, dan Shift Outlet</div>
+          </div>
+          <button class="btn btn-primary" id="p15eGenerate">Buat Jadwal Office/Kitchen</button>
+        </div>
+
+        <div class="card">
+          <div class="form-grid">
+            <div class="field">
+              <label>Dari</label>
+              <input id="p15eFrom" type="date" value="${esc(f.from)}">
+            </div>
+            <div class="field">
+              <label>Sampai</label>
+              <input id="p15eTo" type="date" value="${esc(f.to)}">
+            </div>
+            <div class="field">
+              <label>Karyawan</label>
+              <select id="p15eEmployee">
+                <option value="">Semua karyawan</option>
+                ${active.map(e=>`<option value="${esc(e.id)}" ${f.employee===e.id?'selected':''}>
+                  ${esc(e.full_name)} — ${esc(e.employee_number)}
+                </option>`).join('')}
+              </select>
+            </div>
+            <div class="field">
+              <label>&nbsp;</label>
+              <button class="btn btn-light" id="p15eRefresh">Tampilkan Jadwal</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="muted" style="margin-bottom:10px">
+            Untuk Outlet, gunakan menu penempatan shift pada tahap berikutnya.
+            Tombol di atas hanya membuat jadwal default Office/Kitchen.
+          </div>
+          <div class="table-wrap">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>Karyawan</th><th>Tanggal</th><th>Area</th>
+                  <th>Shift</th><th>Jam</th><th>Telat</th>
+                  <th>Status</th><th>Outlet</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${rows||'<tr><td colspan="8">Belum ada jadwal.</td></tr>'}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    `;
+
+    $('#p15eRefresh').onclick=async()=>{
+      f.from=$('#p15eFrom').value;
+      f.to=$('#p15eTo').value;
+      f.employee=$('#p15eEmployee').value;
+      await phase15eSchedule();
+    };
+
+    $('#p15eGenerate').onclick=async()=>{
+      const emp=$('#p15eEmployee').value;
+      const from=$('#p15eFrom').value;
+      const to=$('#p15eTo').value;
+
+      if(!emp){
+        toast('Pilih satu karyawan untuk membuat jadwal.','error');
+        return;
+      }
+      if(!from||!to||to<from){
+        toast('Rentang tanggal tidak valid.','error');
+        return;
+      }
+
+      try{
+        const n=await p15eGenerate(emp,from,to);
+        toast(`Jadwal berhasil dibuat: ${n} hari.`);
+        await phase15eSchedule();
+      }catch(err){
+        toast(friendlyError(err),'error');
+      }
+    };
+  };
+
+  const __p15eTitle=title;
+  title=function(){
+    if(state.view==='work_schedule') return 'Jadwal Kerja';
+    return __p15eTitle();
+  };
+
+  const __p15eRenderView=renderView;
+  renderView=function(){
+    if(state.view==='work_schedule') return phase15eSchedule();
+    return __p15eRenderView();
+  };
+
+  const __p15eRenderApp=renderApp;
+  renderApp=function(){
+    __p15eRenderApp();
+    const nav=document.querySelector('.sidebar .nav');
+    if(!nav||document.getElementById('phase15eScheduleNav')) return;
+
+    const b=document.createElement('button');
+    b.id='phase15eScheduleNav';
+    b.type='button';
+    b.textContent='Jadwal Kerja';
+    b.dataset.view='work_schedule';
+    b.className=state.view==='work_schedule'?'active':'';
+    b.onclick=()=>{
+      state.view='work_schedule';
+      renderApp();
+    };
+
+    const cal=[...nav.querySelectorAll('button')]
+      .find(x=>/Kalender Kerja/i.test(x.textContent||''));
+
+    if(cal) nav.insertBefore(b,cal);
+    else nav.appendChild(b);
+  };
+
+  console.log('PHASE 15E loaded — Admin Jadwal Kerja');
+})();
