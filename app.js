@@ -8556,3 +8556,465 @@ console.log(
 
   console.log('PHASE 15G FIX loaded — schedule RPC + history normalization');
 })();
+/* ============================================================
+   PHASE 16 — TUGAS LUAR (GPS karyawan lapangan)
+   Tambahkan DI PALING BAWAH app.js yang sedang dipakai.
+   Tidak mengganti modul yang sudah ada; hanya menambah:
+   - Portal Karyawan : menu "Tugas Luar" (mulai/selesai, check-in kunjungan,
+                       pengiriman lokasi berkala selama halaman terbuka)
+   - HR/Admin        : menu "Tugas Luar" (daftar + peta rute & kunjungan)
+   Membutuhkan SQL Step 1 dan Step 2 sudah dijalankan.
+   ============================================================ */
+
+(function () {
+  const TZ = 'Asia/Jakarta';
+  const TRACK_INTERVAL_MS = 120000; // kirim lokasi tiap 2 menit selama tugas luar aktif
+  const FT = { timer: null, busy: false, wakeLock: null, lastSent: null, lastError: null, keepAwake: true };
+
+  /* ---------- Util ---------- */
+  const errText = err =>
+    (err && (err.code || /failed to fetch|network/i.test(err.message || '')))
+      ? friendlyError(err)
+      : ((err && err.message) || 'Terjadi kesalahan.');
+
+  function geoMsg(err) {
+    if (err && err.code === 1) return 'Izin lokasi ditolak. Aktifkan izin lokasi untuk situs ini di pengaturan browser, lalu coba lagi.';
+    if (err && err.code === 2) return 'Lokasi tidak tersedia. Pastikan GPS aktif lalu coba lagi.';
+    if (err && err.code === 3) return 'Pencarian lokasi terlalu lama. Pindah ke area terbuka lalu coba lagi.';
+    return 'Gagal mengambil lokasi.';
+  }
+
+  function getPos() {
+    return new Promise((resolve, reject) => {
+      if (!navigator.geolocation) { reject(new Error('Browser tidak mendukung lokasi (GPS).')); return; }
+      navigator.geolocation.getCurrentPosition(
+        p => resolve({ lat: p.coords.latitude, lng: p.coords.longitude, acc: p.coords.accuracy }),
+        e => reject(new Error(geoMsg(e))),
+        { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }
+      );
+    });
+  }
+
+  /* ---------- Wake lock (menjaga layar tetap menyala agar pelacakan tidak terputus) ---------- */
+  async function acquireWakeLock() {
+    try {
+      if (FT.keepAwake && 'wakeLock' in navigator && !FT.wakeLock) {
+        FT.wakeLock = await navigator.wakeLock.request('screen');
+        FT.wakeLock.addEventListener('release', () => { FT.wakeLock = null; });
+      }
+    } catch (_) { FT.wakeLock = null; }
+  }
+  function releaseWakeLock() {
+    try { if (FT.wakeLock) FT.wakeLock.release(); } catch (_) { }
+    FT.wakeLock = null;
+  }
+
+  /* ---------- Pelacakan berkala ---------- */
+  function updateStatusLine() {
+    const el = document.getElementById('ftStatusLine');
+    if (!el) return;
+    const sent = FT.lastSent ? fmtDateTime(FT.lastSent.toISOString(), TZ) : 'belum ada';
+    el.innerHTML = `Pelacakan: <b>${FT.timer ? 'aktif' : 'tidak aktif'}</b> · Lokasi terakhir terkirim: ${esc(sent)}` +
+      (FT.lastError ? `<div class="error">${esc(FT.lastError)}</div>` : '');
+  }
+
+  async function sendPoint() {
+    if (FT.busy || !empPortal.token) return;
+    FT.busy = true;
+    try {
+      const p = await getPos();
+      const r = await empRpc('employee_field_track_point', { p_latitude: p.lat, p_longitude: p.lng, p_accuracy: p.acc });
+      if (r && r.saved === false && r.reason === 'no_active_trip') { stopTracking(); }
+      else if (r && r.saved) { FT.lastSent = new Date(); }
+      FT.lastError = null;
+    } catch (err) {
+      FT.lastError = errText(err);
+    } finally {
+      FT.busy = false;
+      updateStatusLine();
+    }
+  }
+
+  function stopTracking() {
+    if (FT.timer) clearInterval(FT.timer);
+    FT.timer = null;
+    releaseWakeLock();
+  }
+
+  function startTracking() {
+    stopTracking();
+    FT.timer = setInterval(sendPoint, TRACK_INTERVAL_MS);
+    acquireWakeLock();
+  }
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && FT.timer) { acquireWakeLock(); sendPoint(); }
+  });
+
+  async function resumeIfActive() {
+    try {
+      if (FT.timer || !empPortal.token) return;
+      const st = await empRpc('employee_field_status');
+      if (st && st.consented && st.active_trip) { startTracking(); sendPoint(); }
+    } catch (_) { }
+  }
+
+  /* ---------- Portal Karyawan: halaman Tugas Luar ---------- */
+  function consentHtml() {
+    return `<div class="section"><div class="section-head"><h2>Tugas Luar — Persetujuan Lokasi</h2></div>
+      <div class="info-box">
+        <p>Fitur ini dipakai saat Anda bekerja di luar area kantor/outlet. Sebelum memakainya, mohon baca:</p>
+        <ul>
+          <li>Lokasi GPS Anda hanya dicatat <b>selama tugas luar aktif</b> (sejak Anda menekan "Mulai Tugas Luar" sampai "Selesai") dan saat Anda melakukan check-in kunjungan.</li>
+          <li>Di luar waktu itu, lokasi Anda <b>tidak</b> dicatat.</li>
+          <li>Data lokasi hanya dapat dilihat oleh HR/Admin untuk keperluan verifikasi tugas luar.</li>
+          <li>Titik lokasi dihapus otomatis setelah 90 hari.</li>
+          <li>Agar pelacakan berjalan, halaman ini harus tetap terbuka di HP Anda.</li>
+        </ul>
+      </div>
+      <button class="btn btn-primary" id="ftConsent">Saya Mengerti dan Setuju</button></div>`;
+  }
+
+  function startHtml(st) {
+    return `<div class="section"><div class="section-head"><h2>Tugas Luar</h2></div>
+      <div class="info-box">Tidak ada tugas luar yang aktif. Isi tujuan lalu tekan tombol di bawah. Anda akan diminta mengizinkan lokasi di browser.</div>
+      <div class="field field-full"><label>Tujuan tugas luar *</label>
+        <input id="ftPurpose" maxlength="200" placeholder="Contoh: Kirim barang ke vendor, survei lokasi, meeting klien">
+      </div>
+      <button class="btn btn-primary" id="ftStart">Mulai Tugas Luar</button></div>
+      <div class="muted" style="margin-top:8px">Kunjungan hari ini: ${Number(st.visits_today || 0)}</div>`;
+  }
+
+  function activeHtml(st) {
+    const t = st.active_trip || {};
+    return `<div class="cards">
+        <div class="card"><div class="muted">Status</div><div class="metric" style="font-size:22px">Tugas Luar Aktif</div></div>
+        <div class="card"><div class="muted">Tujuan</div><div class="metric" style="font-size:18px">${esc(t.purpose || '-')}</div></div>
+        <div class="card"><div class="muted">Mulai</div><div class="metric" style="font-size:18px">${esc(fmtDateTime(t.started_at, TZ))}</div></div>
+        <div class="card"><div class="muted">Kunjungan hari ini</div><div class="metric">${Number(st.visits_today || 0)}</div></div>
+      </div>
+      <div class="section"><div class="section-head"><h2>Pelacakan</h2></div>
+        <div id="ftStatusLine" class="muted"></div>
+        <label style="display:block;margin-top:8px"><input type="checkbox" id="ftAwake" ${FT.keepAwake ? 'checked' : ''}> Jaga layar tetap menyala (disarankan agar lokasi terus terkirim; lebih boros baterai)</label>
+        <div class="muted" style="margin-top:6px">Jangan menutup halaman ini atau keluar (logout) selama tugas luar berlangsung.</div>
+      </div>
+      <div class="section"><div class="section-head"><h2>Check-in Kunjungan</h2></div>
+        <div class="field field-full"><label>Nama tempat yang dikunjungi *</label><input id="ftPlace" maxlength="200" placeholder="Contoh: PT Maju Jaya, Gudang Cipete"></div>
+        <div class="field field-full"><label>Catatan (opsional)</label><textarea id="ftNotes" rows="2" maxlength="500"></textarea></div>
+        <button class="btn btn-primary" id="ftCheckin">Check-in Sekarang</button>
+      </div>
+      <div class="section"><button class="btn btn-light" id="ftEnd">Selesai Tugas Luar</button></div>`;
+  }
+
+  async function renderField() {
+    const box = $('#epContent');
+    if (!box) return;
+    box.innerHTML = '<div class="card empty">Memuat tugas luar...</div>';
+    let st;
+    try { st = await empRpc('employee_field_status'); }
+    catch (err) { box.innerHTML = `<div class="card"><div class="error">${esc(errText(err))}</div></div>`; return; }
+
+    if (!st.consented) {
+      stopTracking();
+      box.innerHTML = consentHtml();
+      $('#ftConsent').onclick = async e => {
+        const btn = e.currentTarget; btn.disabled = true;
+        try { await empRpc('employee_field_consent'); toast('Persetujuan tersimpan.'); await renderField(); }
+        catch (err) { toast(errText(err), 'error'); btn.disabled = false; }
+      };
+      return;
+    }
+
+    if (!st.active_trip) {
+      stopTracking();
+      box.innerHTML = startHtml(st);
+      $('#ftStart').onclick = async e => {
+        const btn = e.currentTarget;
+        const purpose = $('#ftPurpose').value.trim();
+        if (!purpose) { toast('Tujuan tugas luar wajib diisi.', 'error'); return; }
+        btn.disabled = true; btn.textContent = 'Mengambil lokasi...';
+        try {
+          const p = await getPos();
+          await empRpc('employee_field_trip_start', { p_purpose: purpose, p_latitude: p.lat, p_longitude: p.lng, p_accuracy: p.acc });
+          FT.lastSent = new Date(); FT.lastError = null;
+          toast('Tugas luar dimulai.');
+          startTracking();
+          await renderField();
+        } catch (err) {
+          toast(errText(err), 'error');
+          btn.disabled = false; btn.textContent = 'Mulai Tugas Luar';
+        }
+      };
+      return;
+    }
+
+    // Tugas luar aktif
+    box.innerHTML = activeHtml(st);
+    if (!FT.timer) startTracking();
+    updateStatusLine();
+
+    $('#ftAwake').onchange = e => {
+      FT.keepAwake = e.target.checked;
+      if (FT.keepAwake) acquireWakeLock(); else releaseWakeLock();
+    };
+
+    $('#ftCheckin').onclick = async e => {
+      const btn = e.currentTarget;
+      const place = $('#ftPlace').value.trim();
+      if (!place) { toast('Nama tempat wajib diisi.', 'error'); return; }
+      btn.disabled = true; btn.textContent = 'Mengambil lokasi...';
+      try {
+        const p = await getPos();
+        if (p.acc > 150 && !confirm(`Akurasi GPS rendah (±${Math.round(p.acc)} meter). Tetap check-in?`)) {
+          btn.disabled = false; btn.textContent = 'Check-in Sekarang'; return;
+        }
+        await empRpc('employee_field_visit_checkin', {
+          p_latitude: p.lat, p_longitude: p.lng, p_accuracy: p.acc,
+          p_place_name: place, p_notes: $('#ftNotes').value.trim() || null
+        });
+        toast('Check-in kunjungan tersimpan.');
+        await renderField();
+      } catch (err) {
+        toast(errText(err), 'error');
+        btn.disabled = false; btn.textContent = 'Check-in Sekarang';
+      }
+    };
+
+    $('#ftEnd').onclick = async e => {
+      if (!confirm('Selesaikan tugas luar sekarang?')) return;
+      const btn = e.currentTarget; btn.disabled = true; btn.textContent = 'Menyelesaikan...';
+      let p = null;
+      try { p = await getPos(); } catch (_) { p = null; }
+      try {
+        await empRpc('employee_field_trip_end', {
+          p_latitude: p ? p.lat : null, p_longitude: p ? p.lng : null, p_accuracy: p ? p.acc : null
+        });
+        stopTracking();
+        toast('Tugas luar selesai.');
+        await renderField();
+      } catch (err) {
+        toast(errText(err), 'error');
+        btn.disabled = false; btn.textContent = 'Selesai Tugas Luar';
+      }
+    };
+  }
+
+  /* ---------- Hook Portal Karyawan ---------- */
+  const __ftOrigPortalView = employeePortalView;
+  employeePortalView = async function (view) {
+    if (view === 'field') {
+      document.querySelectorAll('.sidebar .nav button').forEach(b => b.classList.toggle('active', b.id === 'ftEmpNav'));
+      return renderField();
+    }
+    return __ftOrigPortalView(view);
+  };
+
+  const __ftOrigRenderPortal = renderEmployeePortal;
+  renderEmployeePortal = async function () {
+    await __ftOrigRenderPortal();
+    const nav = document.querySelector('.sidebar .nav');
+    if (nav && !document.getElementById('ftEmpNav')) {
+      const b = document.createElement('button');
+      b.id = 'ftEmpNav'; b.type = 'button'; b.textContent = 'Tugas Luar';
+      b.addEventListener('click', () => employeePortalView('field'));
+      const leave = [...nav.querySelectorAll('button')].find(x => /Cuti/i.test(x.textContent || ''));
+      if (leave) nav.insertBefore(b, leave); else nav.appendChild(b);
+    }
+    const lo = document.getElementById('epLogout');
+    if (lo) lo.onclick = () => { stopTracking(); employeeLogout(); };
+    resumeIfActive();
+  };
+
+  /* ============================================================
+     HR / ADMIN: daftar tugas luar + peta
+     ============================================================ */
+  const HR = { from: null, to: null, rows: [], map: null };
+
+  function hrInit() {
+    if (!HR.from) { HR.from = todayJakarta(); HR.to = todayJakarta(); }
+  }
+
+  function loadLeaflet() {
+    if (window.L) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      if (!document.getElementById('leafletCss')) {
+        const l = document.createElement('link');
+        l.id = 'leafletCss'; l.rel = 'stylesheet';
+        l.href = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css';
+        document.head.appendChild(l);
+      }
+      const s = document.createElement('script');
+      s.src = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js';
+      s.onload = resolve;
+      s.onerror = () => reject(new Error('Gagal memuat library peta. Periksa koneksi internet.'));
+      document.head.appendChild(s);
+    });
+  }
+
+  function routeKm(points) {
+    let m = 0, prev = null;
+    (points || []).forEach(p => {
+      if (p.acc != null && Number(p.acc) > 100) return;   // abaikan titik dengan akurasi buruk
+      const cur = { lat: Number(p.lat), lng: Number(p.lng) };
+      if (!prev) { prev = cur; return; }
+      const d = haversine(prev.lat, prev.lng, cur.lat, cur.lng);
+      if (d >= 15) { m += d; prev = cur; }                // abaikan getaran GPS < 15 m
+    });
+    return m / 1000;
+  }
+
+  function hrBadge(r) {
+    if (r.status === 'active') return '<span class="badge badge-green">Aktif</span>';
+    if (r.status === 'cancelled') return '<span class="badge badge-gray">Dibatalkan</span>';
+    return '<span class="badge badge-gray">Selesai</span>';
+  }
+
+  async function renderHr() {
+    const box = $('#content');
+    if (!box) return;
+    hrInit();
+    box.innerHTML = '<div class="card empty">Memuat tugas luar...</div>';
+    try {
+      const { data, error } = await sb.rpc('hr_field_trips_list', { p_from: HR.from, p_to: HR.to, p_employee: null });
+      if (error) throw error;
+      HR.rows = data || [];
+    } catch (err) {
+      box.innerHTML = `<div class="card"><div class="error">${esc(friendlyError(err))}</div></div>`;
+      return;
+    }
+    drawHr();
+  }
+
+  function drawHr() {
+    const box = $('#content');
+    if (!box) return;
+    const rows = HR.rows;
+    const active = rows.filter(r => r.status === 'active').length;
+    const visits = rows.reduce((a, r) => a + Number(r.visit_count || 0), 0);
+
+    box.innerHTML = `
+      <div class="toolbar">
+        <label class="muted">Dari <input type="date" id="ftFrom" value="${esc(HR.from)}"></label>
+        <label class="muted">Sampai <input type="date" id="ftTo" value="${esc(HR.to)}"></label>
+        <button class="btn btn-primary" id="ftApply">Tampilkan</button>
+        <button class="btn btn-light" id="ftReload">Muat Ulang</button>
+      </div>
+      <div class="cards">
+        <div class="card"><div class="muted">Total tugas luar</div><div class="metric">${rows.length}</div></div>
+        <div class="card"><div class="muted">Sedang aktif</div><div class="metric">${active}</div></div>
+        <div class="card"><div class="muted">Total kunjungan</div><div class="metric">${visits}</div></div>
+      </div>
+      <div class="info-box">Lokasi hanya dicatat selama tugas luar aktif dan atas persetujuan karyawan. Titik lokasi dihapus otomatis setelah 90 hari. Gunakan data ini hanya untuk verifikasi tugas luar.</div>
+      <div class="section"><div class="table-wrap"><table class="table">
+        <thead><tr><th>Karyawan</th><th>Tujuan</th><th>Mulai</th><th>Selesai</th><th>Status</th><th>Kunjungan</th><th>Titik</th><th>Lokasi terakhir</th><th>Aksi</th></tr></thead>
+        <tbody>${rows.length ? rows.map(r => `<tr>
+          <td><b>${esc(r.employee_name || '-')}</b><div class="muted">${esc(r.employee_number || '-')}</div></td>
+          <td>${esc(r.purpose || '-')}</td>
+          <td>${esc(fmtDateTime(r.started_at, TZ))}</td>
+          <td>${r.ended_at ? esc(fmtDateTime(r.ended_at, TZ)) : '-'}</td>
+          <td>${hrBadge(r)}</td>
+          <td>${Number(r.visit_count || 0)}</td>
+          <td>${Number(r.point_count || 0)}</td>
+          <td>${r.last_captured_at ? esc(fmtTime(r.last_captured_at, TZ)) : '-'}</td>
+          <td><button class="btn btn-primary btn-sm" data-ft-trip="${esc(r.id)}">Lihat Peta</button></td>
+        </tr>`).join('') : '<tr><td colspan="9" class="muted">Belum ada tugas luar pada rentang tanggal ini.</td></tr>'}</tbody>
+      </table></div></div>
+      <div id="ftDetail"></div>`;
+
+    $('#ftApply').onclick = () => {
+      const f = $('#ftFrom').value, t = $('#ftTo').value;
+      if (!f || !t) { toast('Tanggal wajib diisi.', 'error'); return; }
+      if (f > t) { toast('Tanggal awal tidak boleh melebihi tanggal akhir.', 'error'); return; }
+      HR.from = f; HR.to = t; renderHr();
+    };
+    $('#ftReload').onclick = () => renderHr();
+    box.querySelectorAll('[data-ft-trip]').forEach(b => b.onclick = () => showTrip(b.dataset.ftTrip));
+  }
+
+  async function showTrip(id) {
+    const holder = $('#ftDetail');
+    if (!holder) return;
+    holder.innerHTML = '<div class="card empty">Memuat peta...</div>';
+    try {
+      const [{ data, error }] = await Promise.all([sb.rpc('hr_field_trip_detail', { p_trip_id: id }), loadLeaflet()]);
+      if (error) throw error;
+      const trip = data.trip || {};
+      const points = data.points || [];
+      const visits = data.visits || [];
+      const km = routeKm(points);
+
+      holder.innerHTML = `<div class="section">
+        <div class="section-head"><h2>${esc(trip.employee_name || '-')} — ${esc(trip.purpose || '-')}</h2></div>
+        <div class="muted">Mulai ${esc(fmtDateTime(trip.started_at, TZ))} · ${trip.ended_at ? 'Selesai ' + esc(fmtDateTime(trip.ended_at, TZ)) : 'Masih aktif'} · ${points.length} titik · ±${km.toFixed(1)} km (perkiraan)</div>
+        <div id="ftMap" style="height:420px;border-radius:12px;margin:12px 0"></div>
+        <div class="table-wrap"><table class="table">
+          <thead><tr><th>#</th><th>Waktu</th><th>Tempat</th><th>Catatan</th><th>Akurasi</th></tr></thead>
+          <tbody>${visits.length ? visits.map((v, i) => `<tr>
+            <td>${i + 1}</td><td>${esc(fmtTime(v.at, TZ))}</td><td>${esc(v.place || '-')}</td>
+            <td>${esc(v.notes || '-')}</td><td>${v.acc != null ? '±' + Math.round(Number(v.acc)) + ' m' : '-'}</td>
+          </tr>`).join('') : '<tr><td colspan="5" class="muted">Belum ada check-in kunjungan.</td></tr>'}</tbody>
+        </table></div></div>`;
+
+      if (HR.map) { HR.map.remove(); HR.map = null; }
+      const map = L.map('ftMap');
+      HR.map = map;
+      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap' }).addTo(map);
+
+      const all = [];
+      const line = points.map(p => [Number(p.lat), Number(p.lng)]);
+      if (line.length) {
+        L.polyline(line, { weight: 4, opacity: 0.8 }).addTo(map);
+        L.circleMarker(line[0], { radius: 8, color: '#15803d', fillColor: '#22c55e', fillOpacity: 1 }).addTo(map).bindTooltip('Mulai');
+        const last = line[line.length - 1];
+        L.circleMarker(last, { radius: 8, color: '#b91c1c', fillColor: '#ef4444', fillOpacity: 1 }).addTo(map)
+          .bindTooltip(trip.status === 'active' ? 'Lokasi terakhir' : 'Selesai');
+        all.push(...line);
+      }
+      visits.forEach((v, i) => {
+        const ll = [Number(v.lat), Number(v.lng)];
+        all.push(ll);
+        const icon = L.divIcon({
+          className: '',
+          html: `<div style="background:#2563eb;color:#fff;border-radius:50%;width:26px;height:26px;line-height:26px;text-align:center;font-weight:700;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)">${i + 1}</div>`,
+          iconSize: [26, 26], iconAnchor: [13, 13]
+        });
+        L.marker(ll, { icon }).addTo(map).bindTooltip(`${i + 1}. ${esc(v.place || '-')}`);
+      });
+      if (all.length) map.fitBounds(L.latLngBounds(all), { padding: [30, 30], maxZoom: 17 });
+      else map.setView([-6.2, 106.8], 11);
+      holder.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } catch (err) {
+      holder.innerHTML = `<div class="card"><div class="error">${esc(friendlyError(err))}</div></div>`;
+    }
+  }
+
+  /* ---------- Hook HR/Admin ---------- */
+  const __ftOrigTitle = title;
+  title = function () {
+    if (state.view === 'field_trips') return 'Tugas Luar (GPS)';
+    return __ftOrigTitle();
+  };
+
+  const __ftOrigRenderView = renderView;
+  renderView = function () {
+    if (state.view === 'field_trips') return renderHr();
+    return __ftOrigRenderView();
+  };
+
+  const __ftOrigRenderApp = renderApp;
+  renderApp = function () {
+    __ftOrigRenderApp();
+    if (!canManageOperationalHR()) return;
+    const nav = document.querySelector('.sidebar .nav');
+    if (!nav || document.getElementById('ftHrNav')) return;
+    const b = document.createElement('button');
+    b.id = 'ftHrNav'; b.type = 'button'; b.textContent = 'Tugas Luar';
+    b.dataset.view = 'field_trips';
+    b.className = state.view === 'field_trips' ? 'active' : '';
+    b.onclick = () => { state.view = 'field_trips'; renderApp(); };
+    const master = [...nav.querySelectorAll('button')].find(x => /Master Data/i.test(x.textContent || ''));
+    if (master) nav.insertBefore(b, master); else nav.appendChild(b);
+  };
+
+  console.log('PHASE 16 — Tugas Luar (GPS) loaded.');
+})();
