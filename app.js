@@ -8075,3 +8075,209 @@ console.log(
 
   console.log('PHASE 15E loaded — Admin Jadwal Kerja');
 })();
+/* ============================================================
+   PHASE 15F — UI SHIFT OUTLET + OFF
+   Tambahkan di paling bawah app.js setelah Phase 15E.
+   ============================================================ */
+(function () {
+  'use strict';
+
+  function p15fOutletAssignmentOnDate(employeeId, date) {
+    const rows = (state.assignments || [])
+      .filter(a =>
+        a.employee_id === employeeId &&
+        a.branch_id &&
+        String(a.start_date || '') <= date &&
+        (!a.end_date || String(a.end_date) >= date)
+      )
+      .sort((a,b) => String(b.start_date || '').localeCompare(String(a.start_date || '')));
+
+    return rows[0] || null;
+  }
+
+  function p15fOutletEmployees(date) {
+    return (state.employees || [])
+      .filter(e =>
+        e.employment_status === 'active' &&
+        p15fOutletAssignmentOnDate(e.id, date)
+      )
+      .sort((a,b) => String(a.full_name || '').localeCompare(String(b.full_name || '')));
+  }
+
+  async function p15fAssign(employeeId, date, shiftCode, notes) {
+    const { error } = await sb.rpc('hr_assign_outlet_shift', {
+      p_employee: employeeId,
+      p_work_date: date,
+      p_shift_code: shiftCode,
+      p_notes: notes || null
+    });
+    if (error) throw error;
+  }
+
+  async function p15fOff(employeeId, date, notes) {
+    const { error } = await sb.rpc('hr_set_day_off', {
+      p_employee: employeeId,
+      p_work_date: date,
+      p_notes: notes || 'OFF sesuai jadwal'
+    });
+    if (error) throw error;
+  }
+
+  function p15fPanelHtml() {
+    const date = todayJakarta();
+    const emps = p15fOutletEmployees(date);
+
+    return `
+      <div class="card" id="phase15fOutletPanel" style="margin-bottom:16px">
+        <div class="section-head">
+          <div>
+            <h3>Jadwal Shift Outlet</h3>
+            <div class="muted">
+              Shift Pagi, Shift Siang, Lembur, atau OFF per tanggal.
+              Minggu dan tanggal merah tetap dapat WORK jika diberi shift.
+            </div>
+          </div>
+        </div>
+
+        <div class="form-grid">
+          <div class="field">
+            <label>Tanggal</label>
+            <input id="p15fDate" type="date" value="${esc(date)}">
+          </div>
+
+          <div class="field">
+            <label>Karyawan Outlet</label>
+            <select id="p15fEmployee">
+              <option value="">Pilih karyawan</option>
+              ${emps.map(e => {
+                const a = p15fOutletAssignmentOnDate(e.id, date);
+                const branch = a ? assignmentLocationName(a) : '-';
+                return `<option value="${esc(e.id)}">
+                  ${esc(e.full_name)} — ${esc(e.employee_number)} — ${esc(branch)}
+                </option>`;
+              }).join('')}
+            </select>
+          </div>
+
+          <div class="field">
+            <label>Shift</label>
+            <select id="p15fShift">
+              <option value="OUTLET_MORNING">Shift Pagi — 07:30–16:00</option>
+              <option value="OUTLET_AFTERNOON">Shift Siang — 12:00–21:00</option>
+              <option value="OUTLET_LONG">Lembur — 07:30–21:00</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label>Catatan</label>
+            <input id="p15fNotes" type="text" placeholder="Opsional">
+          </div>
+        </div>
+
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+          <button class="btn btn-primary" id="p15fSaveShift">
+            Simpan Shift
+          </button>
+          <button class="btn btn-light" id="p15fSaveOff">
+            Set OFF
+          </button>
+          <button class="btn btn-light" id="p15fRefreshEmployees">
+            Refresh Karyawan Outlet
+          </button>
+        </div>
+
+        <div class="muted" style="margin-top:10px">
+          Batas terlambat: Pagi/Lembur 07:31, Siang 12:01.
+        </div>
+      </div>
+    `;
+  }
+
+  const __p15fOriginalSchedule = window.phase15eSchedule;
+
+  window.phase15eSchedule = async function () {
+    await __p15fOriginalSchedule();
+
+    const content = $('#content');
+    if (!content) return;
+
+    const old = document.getElementById('phase15fOutletPanel');
+    if (old) old.remove();
+
+    content.insertAdjacentHTML('afterbegin', p15fPanelHtml());
+
+    const dateEl = $('#p15fDate');
+    const employeeEl = $('#p15fEmployee');
+    const shiftEl = $('#p15fShift');
+    const notesEl = $('#p15fNotes');
+
+    async function refreshEmployees() {
+      const date = dateEl.value || todayJakarta();
+      const emps = p15fOutletEmployees(date);
+
+      employeeEl.innerHTML =
+        '<option value="">Pilih karyawan</option>' +
+        emps.map(e => {
+          const a = p15fOutletAssignmentOnDate(e.id, date);
+          const branch = a ? assignmentLocationName(a) : '-';
+          return `<option value="${esc(e.id)}">
+            ${esc(e.full_name)} — ${esc(e.employee_number)} — ${esc(branch)}
+          </option>`;
+        }).join('');
+    }
+
+    dateEl.addEventListener('change', refreshEmployees);
+    $('#p15fRefreshEmployees').onclick = refreshEmployees;
+
+    $('#p15fSaveShift').onclick = async () => {
+      const employee = employeeEl.value;
+      const date = dateEl.value;
+      const shift = shiftEl.value;
+      const notes = notesEl.value.trim();
+
+      if (!employee || !date || !shift) {
+        toast('Tanggal, karyawan, dan shift wajib diisi.', 'error');
+        return;
+      }
+
+      if (!p15fOutletAssignmentOnDate(employee, date)) {
+        toast('Karyawan tersebut tidak memiliki penempatan Outlet yang efektif pada tanggal tersebut.', 'error');
+        return;
+      }
+
+      try {
+        await p15fAssign(employee, date, shift, notes);
+        toast('Shift Outlet berhasil disimpan.');
+        await window.phase15eSchedule();
+      } catch (err) {
+        toast(friendlyError(err), 'error');
+      }
+    };
+
+    $('#p15fSaveOff').onclick = async () => {
+      const employee = employeeEl.value;
+      const date = dateEl.value;
+      const notes = notesEl.value.trim() || 'OFF sesuai jadwal';
+
+      if (!employee || !date) {
+        toast('Tanggal dan karyawan wajib diisi.', 'error');
+        return;
+      }
+
+      if (!p15fOutletAssignmentOnDate(employee, date)) {
+        toast('Karyawan tersebut tidak memiliki penempatan Outlet yang efektif pada tanggal tersebut.', 'error');
+        return;
+      }
+
+      try {
+        await p15fOff(employee, date, notes);
+        toast('OFF berhasil disimpan.');
+        await window.phase15eSchedule();
+      } catch (err) {
+        toast(friendlyError(err), 'error');
+      }
+    };
+  };
+
+  console.log('PHASE 15F loaded — UI Shift Outlet + OFF');
+})();
