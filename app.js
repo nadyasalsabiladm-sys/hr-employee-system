@@ -9717,3 +9717,272 @@ console.log(
 
   console.log('PHASE 18 LOADED — Potongan Cuti/Gaji, Setengah Hari & Portal Form active');
 })();
+
+/* ============================================================
+   FINAL PATCH — PORTAL CUTI MANDIRI KARYAWAN
+   Memastikan tombol + Ajukan Cuti / Izin / Sakit selalu tampil
+   dan form dapat dibuka tanpa bergantung pada override sebelumnya.
+   ============================================================ */
+(function () {
+  'use strict';
+
+  const __finalPrevEmployeePortalView = employeePortalView;
+
+  function finalLeaveListHtml(rows) {
+    const button = `
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:14px">
+        <button type="button" class="btn btn-primary" id="finalEmployeeApplyLeaveBtn">
+          + Ajukan Cuti / Izin / Sakit
+        </button>
+      </div>`;
+
+    if (!rows.length) {
+      return button + '<div class="card empty">Belum ada pengajuan cuti/izin.</div>';
+    }
+
+    return button + `
+      <div class="section">
+        <div class="section-head">
+          <div>
+            <h2>Pengajuan Saya</h2>
+            <div class="muted">Riwayat pengajuan cuti, izin, dan sakit Anda.</div>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr>
+              <th>Jenis</th><th>Periode</th><th>Hari</th><th>Status</th>
+            </tr></thead>
+            <tbody>
+              ${rows.map(r => `<tr>
+                <td>${esc(r.leave_type_name || '-')}</td>
+                <td>${fmtDate(r.start_date)} — ${fmtDate(r.end_date)}</td>
+                <td>${esc(r.total_days ?? '-')}</td>
+                <td>${esc(r.status_label || r.status || '-')}</td>
+              </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>`;
+  }
+
+  async function finalRenderLeaveApply() {
+    const box = $('#epContent');
+    if (!box) return;
+
+    box.innerHTML = '<div class="card empty">Memuat formulir pengajuan...</div>';
+
+    try {
+      const emp = empPortal.employee;
+      if (!emp?.id) throw new Error('Data karyawan tidak ditemukan. Silakan login kembali.');
+
+      const { data: types, error } = await sb
+        .from('leave_types')
+        .select('id,code,name,requires_attachment,is_active')
+        .eq('is_active', true)
+        .order('name');
+      if (error) throw error;
+      if (!types?.length) throw new Error('Jenis cuti/izin belum tersedia di database.');
+
+      box.innerHTML = `
+        <div class="section">
+          <div class="section-head">
+            <div>
+              <h2>Ajukan Cuti / Izin / Sakit</h2>
+              <div class="muted">Pengajuan Anda akan masuk ke SPV, kemudian diverifikasi HR.</div>
+            </div>
+            <button type="button" class="btn btn-light" id="finalBackLeaveBtn">Kembali</button>
+          </div>
+
+          <form id="finalEmployeeLeaveForm" class="modal-grid" style="margin-top:14px">
+            <div class="field field-full">
+              <label>Jenis Pengajuan *</label>
+              <select id="finalLeaveType" required>
+                ${types.map(t => `<option value="${esc(t.id)}" data-code="${esc(t.code || '')}">${esc(t.name)}</option>`).join('')}
+              </select>
+            </div>
+
+            <div class="field field-full" style="background:var(--bg-subtle,#f8fafc);padding:12px;border-radius:8px">
+              <label style="font-weight:600;display:flex;align-items:center;gap:8px;cursor:pointer">
+                <input type="checkbox" id="finalHalfDay">
+                Ajukan Setengah Hari (0,5 Hari)
+              </label>
+              <div id="finalHalfDayBox" style="display:none;margin-top:8px">
+                <label>Sesi</label>
+                <select id="finalHalfDayType">
+                  <option value="first_half">Sesi Pagi (Datang Siang)</option>
+                  <option value="second_half">Sesi Siang (Pulang Cepat)</option>
+                  <option value="late_checkin">Keterlambatan Masuk</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="field">
+              <label>Tanggal Mulai *</label>
+              <input id="finalStartDate" type="date" required value="${todayJakarta()}">
+            </div>
+            <div class="field" id="finalEndField">
+              <label>Tanggal Berakhir *</label>
+              <input id="finalEndDate" type="date" required value="${todayJakarta()}">
+            </div>
+
+            <div class="field field-full" id="finalWithoutLetterBox" style="display:none;background:#fffbeb;padding:12px;border-radius:8px">
+              <label style="font-weight:600;display:flex;align-items:center;gap:8px;cursor:pointer">
+                <input type="checkbox" id="finalWithoutLetter">
+                Sakit Tanpa Surat Dokter
+              </label>
+              <div class="muted">Akan diproses sesuai aturan potongan yang berlaku.</div>
+            </div>
+
+            <div class="field field-full">
+              <label>Lampiran / Bukti</label>
+              <input id="finalAttachment" type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx">
+              <div class="muted">Lampiran wajib untuk jenis pengajuan yang membutuhkan bukti.</div>
+            </div>
+
+            <div class="field field-full">
+              <label>Alasan / Keterangan *</label>
+              <textarea id="finalReason" rows="4" required placeholder="Tuliskan alasan pengajuan..."></textarea>
+            </div>
+
+            <div class="field field-full">
+              <div class="info-box" id="finalDaysInfo">Jumlah hari kerja akan dihitung otomatis.</div>
+            </div>
+
+            <div class="field field-full" style="display:flex;justify-content:flex-end;gap:8px">
+              <button type="button" class="btn btn-light" id="finalCancelLeaveBtn">Batal</button>
+              <button type="submit" class="btn btn-primary" id="finalSubmitLeaveBtn">Kirim Pengajuan</button>
+            </div>
+          </form>
+        </div>`;
+
+      const typeEl = $('#finalLeaveType');
+      const halfEl = $('#finalHalfDay');
+      const halfBox = $('#finalHalfDayBox');
+      const endField = $('#finalEndField');
+      const startEl = $('#finalStartDate');
+      const endEl = $('#finalEndDate');
+      const sickBox = $('#finalWithoutLetterBox');
+      const withoutEl = $('#finalWithoutLetter');
+      const daysInfo = $('#finalDaysInfo');
+
+      const refreshForm = async () => {
+        const opt = typeEl.selectedOptions[0];
+        const code = String(opt?.dataset.code || '').toUpperCase();
+        const sick = code === 'SICK';
+        const half = halfEl.checked || code === 'HALF_DAY';
+        if (code === 'HALF_DAY') halfEl.checked = true;
+
+        halfBox.style.display = half ? 'block' : 'none';
+        endField.style.display = half ? 'none' : 'block';
+        sickBox.style.display = sick ? 'block' : 'none';
+        if (half) endEl.value = startEl.value;
+
+        let days = half ? 0.5 : 1;
+        if (!half && startEl.value && endEl.value && endEl.value >= startEl.value) {
+          try {
+            const r = await sb.rpc('leave_workdays_between', {
+              p_employee: emp.id,
+              p_start: startEl.value,
+              p_end: endEl.value
+            });
+            if (!r.error && r.data != null) days = Number(r.data);
+            else days = p6Days(startEl.value, endEl.value) || 1;
+          } catch (_) {
+            days = p6Days(startEl.value, endEl.value) || 1;
+          }
+        }
+        daysInfo.innerHTML = `Jumlah hari kerja: <b>${Number.isInteger(days) ? days : days.toFixed(1)} hari</b>`;
+      };
+
+      typeEl.addEventListener('change', refreshForm);
+      halfEl.addEventListener('change', refreshForm);
+      startEl.addEventListener('change', refreshForm);
+      endEl.addEventListener('change', refreshForm);
+      withoutEl.addEventListener('change', refreshForm);
+      $('#finalBackLeaveBtn').onclick = () => employeePortalView('leave');
+      $('#finalCancelLeaveBtn').onclick = () => employeePortalView('leave');
+
+      $('#finalEmployeeLeaveForm').onsubmit = async e => {
+        e.preventDefault();
+        const btn = $('#finalSubmitLeaveBtn');
+        btn.disabled = true;
+        btn.textContent = 'Mengirim...';
+
+        try {
+          const opt = typeEl.selectedOptions[0];
+          const code = String(opt?.dataset.code || '').toUpperCase();
+          const isHalf = halfEl.checked || code === 'HALF_DAY';
+          const start = startEl.value;
+          const end = isHalf ? start : endEl.value;
+          const reason = $('#finalReason').value.trim();
+          const file = $('#finalAttachment').files?.[0] || null;
+          const requiresAttachment = !!opt?.dataset && types.find(t => t.id === typeEl.value)?.requires_attachment;
+
+          if (!start || !end || end < start) throw new Error('Tanggal pengajuan tidak valid.');
+          if (!reason) throw new Error('Alasan / keterangan wajib diisi.');
+          if (requiresAttachment && !file) throw new Error('Lampiran wajib untuk jenis pengajuan ini.');
+
+          let attachmentPath = null;
+          if (file) {
+            if (file.size > 10 * 1024 * 1024) throw new Error('Ukuran lampiran maksimal 10 MB.');
+            const safe = String(file.name || 'dokumen').replace(/[^a-zA-Z0-9._-]+/g, '_');
+            attachmentPath = `leave/${emp.id}/${new Date().getFullYear()}/${Date.now()}-${safe}`;
+            const up = await sb.storage.from('leave-documents').upload(attachmentPath, file, { upsert: false });
+            if (up.error) throw up.error;
+          }
+
+          const res = await empRpc('employee_submit_leave_portal', {
+            p_leave_type_id: typeEl.value,
+            p_start_date: start,
+            p_end_date: end,
+            p_is_half_day: isHalf,
+            p_half_day_type: isHalf ? $('#finalHalfDayType').value : null,
+            p_is_without_letter: code === 'SICK' && withoutEl.checked,
+            p_reason: reason,
+            p_attachment_path: attachmentPath
+          });
+
+          if (!res?.success) throw new Error(res?.message || 'Gagal mengirim pengajuan.');
+          toast('Pengajuan cuti/izin berhasil dikirim ke SPV.');
+          await employeePortalView('leave');
+        } catch (err) {
+          toast(friendlyError(err), 'error');
+        } finally {
+          btn.disabled = false;
+          btn.textContent = 'Kirim Pengajuan';
+        }
+      };
+
+      await refreshForm();
+    } catch (err) {
+      box.innerHTML = `<div class="card"><div class="error">${esc(friendlyError(err))}</div><div style="margin-top:10px"><button class="btn btn-light" onclick="employeePortalView('leave')">Kembali</button></div></div>`;
+    }
+  }
+
+  employeePortalView = async function (view) {
+    if (view === 'leave_apply') {
+      await finalRenderLeaveApply();
+      return;
+    }
+
+    if (view === 'leave') {
+      const box = $('#epContent');
+      if (!box) return;
+      box.innerHTML = '<div class="card empty">Memuat pengajuan...</div>';
+      try {
+        const rows = await employeeLeaveList();
+        box.innerHTML = finalLeaveListHtml(rows || []);
+        const btn = $('#finalEmployeeApplyLeaveBtn');
+        if (btn) btn.onclick = () => employeePortalView('leave_apply');
+      } catch (err) {
+        box.innerHTML = `<div class="card"><div class="error">${esc(friendlyError(err))}</div><div style="margin-top:10px"><button class="btn btn-primary" onclick="employeePortalView('leave_apply')">+ Ajukan Cuti / Izin / Sakit</button></div></div>`;
+      }
+      return;
+    }
+
+    await __finalPrevEmployeePortalView(view);
+  };
+
+  console.log('FINAL PATCH LOADED — Portal Cuti Mandiri aktif.');
+})();
