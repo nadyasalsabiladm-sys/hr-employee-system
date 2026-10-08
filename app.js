@@ -9305,3 +9305,415 @@ console.log(
 
   console.log('PHASE 17 — Ganti PIN + Akses Karyawan loaded.');
 })();
+/* ============================================================
+   PHASE 18 — POTONGAN CUTI/GAJI, PENGAJUAN PORTAL & SETENGAH HARI
+   ============================================================ */
+
+(function () {
+  'use strict';
+
+  /* ---------- Helper Format Desimal Hari ---------- */
+  function p18FmtDays(v) {
+    if (v === null || v === undefined || v === '') return '0';
+    const n = Number(v);
+    return Number.isInteger(n) ? String(n) : n.toFixed(1);
+  }
+
+  /* ---------- 1. SIMULASI POTONGAN (Live Calculation) ---------- */
+  async function p18SimulateDeduction(empId, typeCode, days, isWithoutLetter) {
+    try {
+      const { data, error } = await sb.rpc('calculate_leave_deduction', {
+        p_employee_id: empId,
+        p_leave_type_code: typeCode,
+        p_total_days: Number(days || 0),
+        p_is_without_letter: Boolean(isWithoutLetter),
+        p_year: new Date().getFullYear()
+      });
+      if (error) throw error;
+      return data;
+    } catch (e) {
+      console.warn('Simulasi potongan gagal:', e);
+      return null;
+    }
+  }
+
+  /* ---------- 2. FORM PENGAJUAN CUTI PORTAL KARYAWAN ---------- */
+  async function p18RenderEmployeeLeaveForm() {
+    const box = document.querySelector('#epContent');
+    if (!box) return;
+
+    box.innerHTML = '<div class="card empty">Memuat formulir pengajuan...</div>';
+
+    try {
+      const emp = empPortal.employee;
+      const { data: types, error } = await sb.from('leave_types').select('*').eq('is_active', true).order('name');
+      if (error) throw error;
+
+      box.innerHTML = `
+        <div class="section">
+          <div class="section-head">
+            <div>
+              <h2>Ajukan Cuti / Izin / Sakit</h2>
+              <div class="muted">Pengajuan diajukan ke SPV lalu diverifikasi HR.</div>
+            </div>
+            <button class="btn btn-light" id="p18BackToLeaveList">Kembali ke Daftar</button>
+          </div>
+
+          <form id="p18LeaveForm" class="modal-grid" style="margin-top:14px">
+            <div class="field field-full">
+              <label>Jenis Pengajuan *</label>
+              <select id="p18Type" name="leave_type_id" required>
+                ${types.map(t => `<option value="${esc(t.id)}" data-code="${esc(t.code || '')}">${esc(t.name)}</option>`).join('')}
+              </select>
+            </div>
+
+            <!-- Opsi Setengah Hari -->
+            <div class="field field-full" id="p18HalfDaySection" style="background:var(--bg-subtle,#f8fafc);padding:12px;border-radius:8px">
+              <label style="font-weight:600;display:flex;align-items:center;gap:8px;cursor:pointer">
+                <input type="checkbox" id="p18IsHalfDay" name="is_half_day">
+                Ajukan Setengah Hari (0,5 Hari)
+              </label>
+              <div id="p18HalfDayOptions" style="display:none;margin-top:8px">
+                <label class="muted">Sesi Setengah Hari:</label>
+                <select id="p18HalfDayType" name="half_day_type">
+                  <option value="first_half">Sesi Pagi (Datang Siang)</option>
+                  <option value="second_half">Sesi Siang (Pulang Cepat)</option>
+                  <option value="late_checkin">Keterlambatan Masuk</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="field" id="p18StartDateField">
+              <label>Tanggal Mulai *</label>
+              <input type="date" id="p18StartDate" name="start_date" required value="${todayJakarta()}">
+            </div>
+
+            <div class="field" id="p18EndDateField">
+              <label>Tanggal Berakhir *</label>
+              <input type="date" id="p18EndDate" name="end_date" required value="${todayJakarta()}">
+            </div>
+
+            <!-- Opsi Sakit Tanpa Surat -->
+            <div class="field field-full" id="p18SickOptions" style="display:none;background:#fffbeb;padding:12px;border-radius:8px;border:1px solid #fef3c7">
+              <label style="font-weight:600;display:flex;align-items:center;gap:8px;cursor:pointer;color:#92400e">
+                <input type="checkbox" id="p18WithoutLetter" name="is_without_letter">
+                Sakit Tanpa Surat Dokter
+              </label>
+              <div class="muted" style="margin-top:4px;color:#b45309">
+                Aturan: Sakit tanpa surat dokter diperlakukan seperti Izin (dipotong cuti dulu, jika cuti habis dipotong gaji).
+              </div>
+            </div>
+
+            <div class="field field-full">
+              <label>Lampiran / Bukti (Surat Dokter / Dokumen Pendukung)</label>
+              <input type="file" id="p18Attachment" name="attachment" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx">
+              <div class="muted">Wajib jika ada surat dokter. Boleh dikosongkan jika sakit tanpa surat.</div>
+            </div>
+
+            <div class="field field-full">
+              <label>Alasan / Keterangan *</label>
+              <textarea id="p18Reason" name="reason" rows="3" required placeholder="Tuliskan keterangan..."></textarea>
+            </div>
+
+            <!-- Kartu Simulasi Potongan Real-Time -->
+            <div class="field field-full" id="p18SimCard" style="background:#eff6ff;padding:14px;border-radius:8px;border:1px solid #dbeafe">
+              <div style="font-weight:600;color:#1e40af;margin-bottom:6px">Simulasi Potongan:</div>
+              <div id="p18SimDetails" class="muted">Menghitung...</div>
+            </div>
+
+            <div class="field field-full" style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px">
+              <button type="button" class="btn btn-light" id="p18CancelBtn">Batal</button>
+              <button type="submit" class="btn btn-primary" id="p18SubmitBtn">Kirim Pengajuan</button>
+            </div>
+          </form>
+        </div>
+      `;
+
+      $('#p18BackToLeaveList')?.addEventListener('click', () => employeePortalView('leave'));
+      $('#p18CancelBtn')?.addEventListener('click', () => employeePortalView('leave'));
+
+      const typeSelect = $('#p18Type');
+      const isHalfDayCheckbox = $('#p18IsHalfDay');
+      const halfDayOptions = $('#p18HalfDayOptions');
+      const endDateField = $('#p18EndDateField');
+      const sickOptions = $('#p18SickOptions');
+      const withoutLetterCheckbox = $('#p18WithoutLetter');
+      const startDateInput = $('#p18StartDate');
+      const endDateInput = $('#p18EndDate');
+      const simDetails = $('#p18SimDetails');
+
+      const updateFormView = async () => {
+        const opt = typeSelect.selectedOptions[0];
+        const code = opt ? opt.dataset.code : '';
+        const isSick = code === 'SICK';
+        const isHalfDay = isHalfDayCheckbox.checked || code === 'HALF_DAY';
+
+        if (code === 'HALF_DAY') isHalfDayCheckbox.checked = true;
+
+        sickOptions.style.display = isSick ? 'block' : 'none';
+        halfDayOptions.style.display = isHalfDay ? 'block' : 'none';
+        endDateField.style.display = isHalfDay ? 'none' : 'block';
+
+        if (isHalfDay) endDateInput.value = startDateInput.value;
+
+        // Hitung total hari
+        let totalDays = 1.0;
+        if (isHalfDay) {
+          totalDays = 0.5;
+        } else {
+          const s = startDateInput.value, e = endDateInput.value;
+          if (s && e && e >= s) {
+            try {
+              totalDays = await sb.rpc('leave_workdays_between', { p_employee: emp.id, p_start: s, p_end: e }).then(r => r.data || 1.0);
+            } catch (_) {
+              totalDays = p6Days(s, e) || 1.0;
+            }
+          }
+        }
+
+        const isWithout = isSick && withoutLetterCheckbox.checked;
+        const sim = await p18SimulateDeduction(emp.id, code, totalDays, isWithout);
+
+        if (sim) {
+          simDetails.innerHTML = `
+            <div>Total Hari Kerja: <b>${p18FmtDays(sim.total_days)} hari</b></div>
+            <div>Sisa Hak Cuti Tahunan: <b>${p18FmtDays(sim.available_leave)} hari</b></div>
+            <div style="margin-top:4px">
+              ${sim.deducted_leave_days > 0 ? `<span class="badge badge-blue">Dipotong Cuti: ${p18FmtDays(sim.deducted_leave_days)} hari</span> ` : ''}
+              ${sim.deducted_salary_days > 0 ? `<span class="badge badge-red">Dipotong Gaji: ${p18FmtDays(sim.deducted_salary_days)} hari</span> ` : ''}
+              ${sim.deducted_leave_days === 0 && sim.deducted_salary_days === 0 ? `<span class="badge badge-green">Tidak Ada Potongan (Sakit Resmi)</span>` : ''}
+            </div>
+          `;
+        }
+      };
+
+      typeSelect.addEventListener('change', updateFormView);
+      isHalfDayCheckbox.addEventListener('change', updateFormView);
+      withoutLetterCheckbox.addEventListener('change', updateFormView);
+      startDateInput.addEventListener('change', updateFormView);
+      endDateInput.addEventListener('change', updateFormView);
+
+      // Trigger awal
+      updateFormView();
+
+      // Submit Form
+      $('#p18LeaveForm').onsubmit = async e => {
+        e.preventDefault();
+        const btn = $('#p18SubmitBtn');
+        btn.disabled = true;
+        btn.textContent = 'Mengirim...';
+
+        try {
+          const typeId = typeSelect.value;
+          const isHalf = isHalfDayCheckbox.checked;
+          const halfType = isHalf ? $('#p18HalfDayType').value : null;
+          const isWithout = withoutLetterCheckbox.checked;
+          const start = startDateInput.value;
+          const end = isHalf ? start : endDateInput.value;
+          const reason = $('#p18Reason').value.trim();
+          const file = $('#p18Attachment').files[0];
+
+          let attachmentPath = null;
+          if (file) {
+            if (file.size > 10 * 1024 * 1024) throw new Error('Ukuran lampiran maksimal 10 MB.');
+            const safe = String(file.name || 'dokumen').replace(/[^a-zA-Z0-9._-]+/g, '_');
+            attachmentPath = `leave/${emp.id}/${new Date().getFullYear()}/${Date.now()}-${safe}`;
+            const up = await sb.storage.from('leave-documents').upload(attachmentPath, file, { upsert: false });
+            if (up.error) throw up.error;
+          }
+
+          const res = await empRpc('employee_submit_leave_portal', {
+            p_leave_type_id: typeId,
+            p_start_date: start,
+            p_end_date: end,
+            p_is_half_day: isHalf,
+            p_half_day_type: halfType,
+            p_is_without_letter: isWithout,
+            p_reason: reason,
+            p_attachment_path: attachmentPath
+          });
+
+          if (!res?.success) throw new Error(res?.message || 'Gagal mengirim pengajuan.');
+
+          toast('Pengajuan cuti/izin/setengah hari berhasil dikirim.');
+          await employeePortalView('leave');
+        } catch (err) {
+          toast(friendlyError(err), 'error');
+          btn.disabled = false;
+          btn.textContent = 'Kirim Pengajuan';
+        }
+      };
+
+    } catch (err) {
+      box.innerHTML = `<div class="card"><div class="error">${esc(friendlyError(err))}</div></div>`;
+    }
+  }
+
+  /* ---------- 3. REKAP POTONGAN HR (Tampilan Tab Baru di Menu Cuti) ---------- */
+  async function p18RenderDeductionRecap(container) {
+    container.innerHTML = '<div class="card empty">Memuat data rekapitulasi potongan...</div>';
+
+    try {
+      const fromInput = todayJakarta().slice(0, 7) + '-01';
+      const toInput = todayJakarta();
+
+      const { data, error } = await sb.rpc('hr_recap_deductions_list', {
+        p_from: fromInput,
+        p_to: toInput,
+        p_company: null
+      });
+
+      if (error) throw error;
+      const rows = data || [];
+
+      const totalLeave = rows.reduce((s, r) => s + Number(r.deducted_leave_days || 0), 0);
+      const totalSalary = rows.reduce((s, r) => s + Number(r.deducted_salary_days || 0), 0);
+
+      container.innerHTML = `
+        <div class="cards" style="margin-bottom:14px">
+          <div class="card"><div class="muted">Total Transaksi Potongan</div><div class="metric">${rows.length}</div></div>
+          <div class="card"><div class="muted">Total Potongan Cuti</div><div class="metric">${p18FmtDays(totalLeave)} <span style="font-size:14px">hari</span></div></div>
+          <div class="card"><div class="muted">Total Potongan Gaji</div><div class="metric">${p18FmtDays(totalSalary)} <span style="font-size:14px">hari</span></div></div>
+        </div>
+
+        <div class="table-wrap">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Karyawan</th>
+                <th>Jenis</th>
+                <th>Periode</th>
+                <th>Hari</th>
+                <th>Potong Cuti</th>
+                <th>Potong Gaji</th>
+                <th>Alasan</th>
+                <th>Disetujui HR</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows.length ? rows.map(r => `
+                <tr>
+                  <td><b>${esc(r.employee_name)}</b><div class="muted">${esc(r.employee_number)} · ${esc(r.company_name || '-')}</div></td>
+                  <td>
+                    ${esc(r.leave_type_name)}
+                    ${r.is_half_day ? '<br><span class="badge badge-yellow">0.5 Hari</span>' : ''}
+                    ${r.is_without_letter ? '<br><span class="badge badge-red">Tanpa Surat</span>' : ''}
+                  </td>
+                  <td>${fmtDate(r.start_date)} ${r.start_date !== r.end_date ? '— ' + fmtDate(r.end_date) : ''}</td>
+                  <td>${p18FmtDays(r.total_days)}</td>
+                  <td><b>${r.deducted_leave_days > 0 ? `<span class="badge badge-blue">${p18FmtDays(r.deducted_leave_days)} hari</span>` : '-'}</b></td>
+                  <td><b>${r.deducted_salary_days > 0 ? `<span class="badge badge-red">${p18FmtDays(r.deducted_salary_days)} hari</span>` : '-'}</b></td>
+                  <td>${esc(r.reason || '-')}</td>
+                  <td>${r.hr_approved_at ? fmtDate(r.hr_approved_at.slice(0, 10)) : '-'}</td>
+                </tr>
+              `).join('') : '<tr><td colspan="8" class="muted">Belum ada potongan yang disetujui HR pada periode ini.</td></tr>'}
+            </tbody>
+          </table>
+        </div>
+      `;
+    } catch (err) {
+      container.innerHTML = `<div class="card"><div class="error">${esc(friendlyError(err))}</div></div>`;
+    }
+  }
+
+  /* ---------- 4. OVERRIDE APPROVAL HR DENGAN KALKULASI ATOMIK ---------- */
+  window.phase6cFinalApproveHR = async function (requestId, decision) {
+    try {
+      const profile = state.profile;
+      if (!profile || !canManageOperationalHR()) {
+        toast('Akun ini bukan akun HR/Admin.', 'error');
+        return;
+      }
+
+      const isApprove = decision === 'approved';
+      if (!confirm(isApprove ? 'Setujui pengajuan ini dan terapkan perhitungan potongan?' : 'Tolak pengajuan ini?')) return;
+
+      const note = isApprove ? null : ((prompt('Alasan penolakan HR (opsional):') || '').trim() || null);
+
+      const { data, error } = await sb.rpc('hr_approve_leave_request', {
+        p_request_id: requestId,
+        p_decision: decision,
+        p_note: note
+      });
+
+      if (error) throw error;
+
+      if (isApprove) {
+        const cuti = p18FmtDays(data?.deducted_leave_days);
+        const gaji = p18FmtDays(data?.deducted_salary_days);
+        toast(`Pengajuan disetujui HR. (Potong cuti: ${cuti} hari, Potong gaji: ${gaji} hari)`);
+      } else {
+        toast('Pengajuan ditolak HR.');
+      }
+
+      if (typeof p6RefreshLeaveData === 'function') await p6RefreshLeaveData();
+      if (typeof loadAll === 'function') await loadAll();
+      if (typeof leave === 'function') leave();
+    } catch (err) {
+      console.error('P18 Approve HR error:', err);
+      toast(friendlyError(err), 'error');
+    }
+  };
+
+  /* ---------- 5. OVERRIDE VIEW CUTI & PORTAL ---------- */
+  // Portal Karyawan: sambungkan tombol "+ Ajukan Cuti" ke form baru
+  const __p18OriginalPortalLeaveHtml = employeeLeaveHtml;
+  window.employeeLeaveHtml = function (rows) {
+    const orig = __p18OriginalPortalLeaveHtml(rows);
+    return `
+      <div style="display:flex;justify-content:flex-end;margin-bottom:12px">
+        <button class="btn btn-primary" id="p18PortalApplyBtn">+ Ajukan Cuti / Izin / Sakit</button>
+      </div>
+      ${orig}
+    `;
+  };
+
+  const __p18OriginalPortalView = employeePortalView;
+  employeePortalView = async function (view) {
+    if (view === 'leave_apply') return p18RenderEmployeeLeaveForm();
+    await __p18OriginalPortalView(view);
+    $('#p18PortalApplyBtn')?.addEventListener('click', () => employeePortalView('leave_apply'));
+  };
+
+  // HR Admin Cuti: tambahkan tab Rekap Potongan
+  const __p18OriginalLeave = leave;
+  leave = function () {
+    __p18OriginalLeave();
+    const content = $('#content');
+    if (!content) return;
+
+    const section = document.createElement('div');
+    section.className = 'section';
+    section.style.marginTop = '24px';
+    section.innerHTML = `
+      <div class="section-head">
+        <div>
+          <h2>Rekap Potongan (Cuti & Gaji)</h2>
+          <div class="muted">Potongan yang sudah disetujui HR (Bulan Ini)</div>
+        </div>
+      </div>
+      <div id="p18DeductionRecapBox"></div>
+    `;
+    content.appendChild(section);
+
+    p18RenderDeductionRecap(section.querySelector('#p18DeductionRecapBox'));
+  };
+
+  /* ---------- 6. INTEGRASI ABSENSI > 10:30 (OFFICE/KITCHEN) ---------- */
+  window.p18ProcessLateCheckin = async function (attendanceId, empName) {
+    if (!confirm(`Terapkan potongan 0,5 hari untuk ${empName} karena absensi setelah 10:30? (Dipotong dari cuti dulu, jika habis dipotong gaji)`)) return;
+    try {
+      const { data, error } = await sb.rpc('hr_process_late_attendance_deduction', {
+        p_attendance_id: attendanceId,
+        p_notes: 'Absen setelah 10:30 (Office/Kitchen)'
+      });
+      if (error) throw error;
+      toast(`Potongan 0.5 hari berhasil diproses untuk ${empName}. (Potong cuti: ${p18FmtDays(data?.deducted_leave_days)}, Potong gaji: ${p18FmtDays(data?.deducted_salary_days)})`);
+      if (typeof refreshAttendance === 'function') await refreshAttendance();
+    } catch (err) {
+      toast(friendlyError(err), 'error');
+    }
+  };
+
+  console.log('PHASE 18 LOADED — Potongan Cuti/Gaji, Setengah Hari & Portal Form active');
+})();
