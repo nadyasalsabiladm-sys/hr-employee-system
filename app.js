@@ -9986,3 +9986,17 @@ console.log(
 
   console.log('FINAL PATCH LOADED — Portal Cuti Mandiri aktif.');
 })();
+async function toggleSupervisor(employeeId, makeSpv) {
+  const { error } = await sb.rpc('hr_set_supervisor', {
+    target_employee_id: employeeId,
+    make_spv: makeSpv
+  });
+  if (error) {
+    if (error.code === '42501') return alert('Anda tidak berhak mengubah SPV.');
+    return alert('Gagal: ' + error.message);
+  }
+  alert(makeSpv
+    ? 'Berhasil dijadikan SPV. Karyawan perlu login ulang agar menu Approval Tim muncul.'
+    : 'SPV dicabut. Atasan para bawahannya telah dikosongkan.');
+  renderEmployeeList(); // refresh tampilan
+}
