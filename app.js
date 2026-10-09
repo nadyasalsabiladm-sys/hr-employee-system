@@ -10000,3 +10000,37 @@ async function toggleSupervisor(employeeId, makeSpv) {
     : 'SPV dicabut. Atasan para bawahannya telah dikosongkan.');
   renderEmployeeList(); // refresh tampilan
 }
+// ===== Manajemen SPV (Opsi B: is_supervisor) =====
+async function toggleSupervisor(employeeId, makeSpv) {
+  if (!(isHRUser() || isAdminUser())) {
+    alert('Hanya HR/Admin yang dapat mengubah status SPV.');
+    return;
+  }
+
+  const confirmMsg = makeSpv
+    ? 'Jadikan karyawan ini sebagai SPV?'
+    : 'Cabut status SPV? Semua bawahannya akan dilepas dari SPV ini.';
+  if (!confirm(confirmMsg)) return;
+
+  const { data, error } = await sb.rpc('hr_set_supervisor', {
+    target_employee_id: employeeId,
+    make_spv: makeSpv
+  });
+
+  if (error) {
+    console.error('hr_set_supervisor error:', error);
+    alert('Gagal: ' + (error.message || 'Terjadi kesalahan'));
+    return;
+  }
+
+  if (makeSpv) {
+    alert('Berhasil: karyawan sekarang menjadi SPV.');
+  } else {
+    alert(`Status SPV dicabut. ${data?.released ?? 0} bawahan dilepas.`);
+  }
+
+  // Muat ulang daftar karyawan — sesuaikan dengan nama fungsi di app.js Anda
+  if (typeof loadEmployees === 'function') await loadEmployees();
+}
+
+window.toggleSupervisor = toggleSupervisor;
