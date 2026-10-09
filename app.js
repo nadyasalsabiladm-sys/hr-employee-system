@@ -10034,3 +10034,124 @@ async function toggleSupervisor(employeeId, makeSpv) {
 }
 
 window.toggleSupervisor = toggleSupervisor;
+// ===================== KELOLA SPV (HR/Admin) =====================
+(function () {
+  const esc = s => String(s ?? '').replace(/[&<>"']/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const nameOf = e => e.full_name || e.name || e.nama || e.employee_name || e.employee_code || e.id;
+  const codeOf = e => e.employee_code || e.nik || e.code || '';
+  const deptOf = e => e.department || e.departemen || e.division || e.job_title || '';
+
+  async function canManage() {
+    try {
+      const hr = typeof isHRUser === 'function' ? await isHRUser() : false;
+      const ad = typeof isAdminUser === 'function' ? await isAdminUser() : false;
+      return !!(hr || ad);
+    } catch { return false; }
+  }
+
+  let cache = [];
+
+  function renderRows(filter = '') {
+    const tbody = document.getElementById('spvTbody');
+    if (!tbody) return;
+    const q = filter.toLowerCase();
+    const rows = cache.filter(e =>
+      !q || `${nameOf(e)} ${codeOf(e)} ${deptOf(e)}`.toLowerCase().includes(q));
+    tbody.innerHTML = rows.map(e => `
+      <tr>
+        <td style="padding:6px">${esc(nameOf(e))}<br><small style="color:#888">${esc(codeOf(e))}</small></td>
+        <td style="padding:6px">${esc(deptOf(e))}</td>
+        <td style="padding:6px;text-align:center">${e.is_supervisor ? '✅ SPV' : '—'}</td>
+        <td style="padding:6px;text-align:center">
+          <button data-id="${e.id}" data-spv="${e.is_supervisor ? 1 : 0}" class="spv-toggle"
+            style="padding:4px 10px;border:none;border-radius:6px;cursor:pointer;color:#fff;
+                   background:${e.is_supervisor ? '#dc2626' : '#16a34a'}">
+            ${e.is_supervisor ? 'Cabut SPV' : 'Jadikan SPV'}
+          </button>
+        </td>
+      </tr>`).join('') || '<tr><td colspan="4" style="padding:10px;text-align:center">Tidak ada data</td></tr>';
+  }
+
+  async function loadEmployees() {
+    const { data, error } = await sb.from('employees').select('*').order('created_at', { ascending: true });
+    if (error) { alert('Gagal memuat karyawan: ' + error.message); return; }
+    cache = data || [];
+    renderRows(document.getElementById('spvSearch')?.value || '');
+  }
+
+  async function toggleSupervisor(id, makeSpv, btn) {
+    const emp = cache.find(e => e.id === id);
+    const label = makeSpv ? 'menjadikan SPV' : 'mencabut status SPV';
+    if (!confirm(`Yakin ${label} untuk ${nameOf(emp)}?`)) return;
+    btn.disabled = true; btn.textContent = 'Memproses...';
+    const { error } = await sb.rpc('hr_set_supervisor', { target_employee_id: id, make_spv: makeSpv });
+    if (error) {
+      alert('Gagal: ' + error.message);
+    } else {
+      emp.is_supervisor = makeSpv;
+    }
+    renderRows(document.getElementById('spvSearch')?.value || '');
+  }
+
+  function openPanel() {
+    let modal = document.getElementById('spvModal');
+    if (!modal) {
+      modal = document.createElement('div');
+      modal.id = 'spvModal';
+      modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center';
+      modal.innerHTML = `
+        <div style="background:#fff;color:#111;width:min(760px,95vw);max-height:85vh;border-radius:12px;padding:16px;display:flex;flex-direction:column">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+            <h3 style="margin:0">Kelola Supervisor (SPV)</h3>
+            <button id="spvClose" style="border:none;background:none;font-size:22px;cursor:pointer">×</button>
+          </div>
+          <input id="spvSearch" placeholder="Cari nama / kode / departemen..."
+            style="padding:8px;border:1px solid #ccc;border-radius:6px;margin-bottom:10px">
+          <div style="overflow:auto">
+            <table style="width:100%;border-collapse:collapse;font-size:14px">
+              <thead><tr style="background:#f3f4f6">
+                <th style="padding:6px;text-align:left">Karyawan</th>
+                <th style="padding:6px;text-align:left">Departemen</th>
+                <th style="padding:6px">Status</th>
+                <th style="padding:6px">Aksi</th>
+              </tr></thead>
+              <tbody id="spvTbody"><tr><td colspan="4" style="padding:10px;text-align:center">Memuat...</td></tr></tbody>
+            </table>
+          </div>
+        </div>`;
+      document.body.appendChild(modal);
+      modal.querySelector('#spvClose').onclick = () => (modal.style.display = 'none');
+      modal.onclick = e => { if (e.target === modal) modal.style.display = 'none'; };
+      modal.querySelector('#spvSearch').oninput = e => renderRows(e.target.value);
+      modal.querySelector('#spvTbody').onclick = e => {
+        const b = e.target.closest('.spv-toggle');
+        if (b) toggleSupervisor(b.dataset.id, b.dataset.spv !== '1', b);
+      };
+    }
+    modal.style.display = 'flex';
+    loadEmployees();
+  }
+
+  async function mountButton() {
+    if (document.getElementById('btnKelolaSpv')) return;
+    if (!(await canManage())) return;   // hanya HR/Admin
+    const btn = document.createElement('button');
+    btn.id = 'btnKelolaSpv';
+    btn.textContent = '👥 Kelola SPV';
+    btn.style.cssText = 'position:fixed;bottom:20px;right:20px;z-index:9998;padding:10px 16px;border:none;border-radius:999px;background:#2563eb;color:#fff;font-weight:600;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,.2)';
+    btn.onclick = openPanel;
+    document.body.appendChild(btn);
+  }
+
+  window.openSpvManager = openPanel;
+  window.toggleSupervisor = (id, makeSpv) => toggleSupervisor(id, makeSpv, document.createElement('button'));
+
+  // Tampilkan tombol setelah login HR/Admin
+  sb.auth.onAuthStateChange((_e, session) => {
+    if (session) mountButton();
+    else document.getElementById('btnKelolaSpv')?.remove();
+  });
+  document.addEventListener('DOMContentLoaded', mountButton);
+  mountButton();
+})();
