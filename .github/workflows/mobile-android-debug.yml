@@ -2,7 +2,7 @@ name: Phase 21 Android debug build
 
 on:
   push:
-    branches: [phase21-mobile-prep]
+    branches: [phase21-mobile-prep, phase22-premium-ui]
   workflow_dispatch:
 
 permissions:
