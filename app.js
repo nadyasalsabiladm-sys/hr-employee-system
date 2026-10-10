@@ -8569,7 +8569,7 @@ console.log(
 (function () {
   const TZ = 'Asia/Jakarta';
   const TRACK_INTERVAL_MS = 120000; // kirim lokasi tiap 2 menit selama tugas luar aktif
-  const FT = { timer: null, busy: false, wakeLock: null, lastSent: null, lastError: null, keepAwake: true };
+  const FT = { timer: null, native: false, nativeStarting: false, busy: false, wakeLock: null, lastSent: null, lastError: null, keepAwake: true };
 
   /* ---------- Util ---------- */
   const errText = err =>
@@ -8614,16 +8614,15 @@ console.log(
     const el = document.getElementById('ftStatusLine');
     if (!el) return;
     const sent = FT.lastSent ? fmtDateTime(FT.lastSent.toISOString(), TZ) : 'belum ada';
-    el.innerHTML = `Pelacakan: <b>${FT.timer ? 'aktif' : 'tidak aktif'}</b> · Lokasi terakhir terkirim: ${esc(sent)}` +
+    el.innerHTML = `Pelacakan: <b>${(FT.timer || FT.native || FT.nativeStarting) ? 'aktif' : 'tidak aktif'}</b> · Lokasi terakhir terkirim: ${esc(sent)}` +
       (FT.lastError ? `<div class="error">${esc(FT.lastError)}</div>` : '');
   }
 
-  async function sendPoint() {
+  async function sendCoordinates(lat, lng, acc) {
     if (FT.busy || !empPortal.token) return;
     FT.busy = true;
     try {
-      const p = await getPos();
-      const r = await empRpc('employee_field_track_point', { p_latitude: p.lat, p_longitude: p.lng, p_accuracy: p.acc });
+      const r = await empRpc('employee_field_track_point', { p_latitude: lat, p_longitude: lng, p_accuracy: acc });
       if (r && r.saved === false && r.reason === 'no_active_trip') { stopTracking(); }
       else if (r && r.saved) { FT.lastSent = new Date(); }
       FT.lastError = null;
@@ -8635,16 +8634,64 @@ console.log(
     }
   }
 
+  async function sendPoint() {
+    try {
+      const p = await getPos();
+      await sendCoordinates(p.lat, p.lng, p.acc);
+    } catch (err) {
+      FT.lastError = errText(err);
+      updateStatusLine();
+    }
+  }
+
   function stopTracking() {
     if (FT.timer) clearInterval(FT.timer);
     FT.timer = null;
+    FT.nativeStarting = false;
+    const wasNative = FT.native;
+    FT.native = false;
     releaseWakeLock();
+    if (wasNative && window.HRISBackgroundLocation) {
+      window.HRISBackgroundLocation.stop().catch(err => {
+        FT.lastError = 'Pelacakan native gagal dihentikan dengan bersih.';
+        updateStatusLine();
+        console.warn('[HRIS background location] stop failed', err);
+      });
+    }
+    updateStatusLine();
   }
 
-  function startTracking() {
-    stopTracking();
+  async function startTracking() {
+    if (FT.timer || FT.native || FT.nativeStarting) return;
+    const bridge = window.HRISBackgroundLocation;
+    if (bridge && bridge.isNative()) {
+      FT.nativeStarting = true;
+      updateStatusLine();
+      try {
+        await bridge.start(
+          location => {
+            if (!empPortal.token || !FT.native) return;
+            sendCoordinates(location.latitude, location.longitude, location.accuracy);
+          },
+          error => {
+            FT.lastError = 'Pelacakan latar belakang: ' + ((error && error.message) || 'izin/lokasi tidak tersedia.');
+            updateStatusLine();
+          }
+        );
+        FT.native = true;
+        FT.lastError = null;
+      } catch (err) {
+        FT.lastError = 'Pelacakan latar belakang belum dapat dimulai: ' + ((err && err.message) || 'periksa izin lokasi.');
+        FT.native = false;
+      } finally {
+        FT.nativeStarting = false;
+        updateStatusLine();
+      }
+      return;
+    }
     FT.timer = setInterval(sendPoint, TRACK_INTERVAL_MS);
     acquireWakeLock();
+    updateStatusLine();
   }
 
   document.addEventListener('visibilitychange', () => {
@@ -8653,7 +8700,7 @@ console.log(
 
   async function resumeIfActive() {
     try {
-      if (FT.timer || !empPortal.token) return;
+      if (FT.timer || FT.native || FT.nativeStarting || !empPortal.token) return;
       const st = await empRpc('employee_field_status');
       if (st && st.consented && st.active_trip) { startTracking(); sendPoint(); }
     } catch (_) { }
@@ -8669,7 +8716,7 @@ console.log(
           <li>Di luar waktu itu, lokasi Anda <b>tidak</b> dicatat.</li>
           <li>Data lokasi hanya dapat dilihat oleh HR/Admin untuk keperluan verifikasi tugas luar.</li>
           <li>Titik lokasi dihapus otomatis setelah 90 hari.</li>
-          <li>Agar pelacakan berjalan, halaman ini harus tetap terbuka di HP Anda.</li>
+          <li>Pada aplikasi Android, lokasi dapat direkam di latar belakang selama tugas aktif dan akan ditampilkan sebagai notifikasi. Ketersediaannya bergantung pada izin perangkat, baterai, dan jaringan.</li>
         </ul>
       </div>
       <button class="btn btn-primary" id="ftConsent">Saya Mengerti dan Setuju</button></div>`;
@@ -8750,7 +8797,7 @@ console.log(
 
     // Tugas luar aktif
     box.innerHTML = activeHtml(st);
-    if (!FT.timer) startTracking();
+    if (!FT.timer && !FT.native && !FT.nativeStarting) startTracking();
     updateStatusLine();
 
     $('#ftAwake').onchange = e => {
