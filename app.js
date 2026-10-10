@@ -8569,7 +8569,7 @@ console.log(
 (function () {
   const TZ = 'Asia/Jakarta';
   const TRACK_INTERVAL_MS = 120000; // kirim lokasi tiap 2 menit selama tugas luar aktif
-  const FT = { timer: null, native: false, nativeStarting: false, busy: false, wakeLock: null, lastSent: null, lastError: null, keepAwake: true };
+  const FT = { timer: null, native: false, nativeStarting: false, generation: 0, busy: false, wakeLock: null, lastSent: null, lastError: null, keepAwake: true };
 
   /* ---------- Util ---------- */
   const errText = err =>
@@ -8647,11 +8647,12 @@ console.log(
   function stopTracking() {
     if (FT.timer) clearInterval(FT.timer);
     FT.timer = null;
+    FT.generation += 1;
     FT.nativeStarting = false;
     const wasNative = FT.native;
     FT.native = false;
     releaseWakeLock();
-    if (wasNative && window.HRISBackgroundLocation) {
+    if (window.HRISBackgroundLocation && (wasNative || FT.generation > 0)) {
       window.HRISBackgroundLocation.stop().catch(err => {
         FT.lastError = 'Pelacakan native gagal dihentikan dengan bersih.';
         updateStatusLine();
@@ -8666,6 +8667,7 @@ console.log(
     const bridge = window.HRISBackgroundLocation;
     if (bridge && bridge.isNative()) {
       FT.nativeStarting = true;
+      const startGeneration = FT.generation;
       updateStatusLine();
       try {
         await bridge.start(
@@ -8678,6 +8680,10 @@ console.log(
             updateStatusLine();
           }
         );
+        if (startGeneration !== FT.generation || !empPortal.token) {
+          await bridge.stop();
+          return;
+        }
         FT.native = true;
         FT.lastError = null;
       } catch (err) {
