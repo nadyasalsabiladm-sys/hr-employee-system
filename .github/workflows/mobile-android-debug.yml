@@ -39,6 +39,9 @@ jobs:
       - name: Generate Android project
         run: npx cap add android
 
+      - name: Add Android camera and location permissions
+        run: node scripts/add-android-permissions.mjs
+
       - name: Sync Capacitor
         run: npx cap sync android
 
