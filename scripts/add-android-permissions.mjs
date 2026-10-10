@@ -12,16 +12,16 @@ const permissions = [
 
 const missing = permissions.filter(permission => !xml.includes(`android:name="${permission}"`));
 if (missing.length) {
-  const declarations = missing.map(permission => `    <uses-permission android:name="${permission}" />`).join('\\n');
-  const manifestTag = xml.match(/<manifest\\b[^>]*>/);
+  const declarations = missing.map(permission => `    <uses-permission android:name="${permission}" />`).join('\n');
+  const manifestTag = xml.match(/<manifest\b[^>]*>/);
   if (!manifestTag) throw new Error('Tag <manifest> tidak ditemukan di AndroidManifest.xml');
-  xml = xml.replace(manifestTag[0], `${manifestTag[0]}\\n${declarations}`);
+  xml = xml.replace(manifestTag[0], `${manifestTag[0]}\n${declarations}`);
 }
 
 if (!xml.includes('android.hardware.camera')) {
-  const manifestTag = xml.match(/<manifest\\b[^>]*>/);
+  const manifestTag = xml.match(/<manifest\b[^>]*>/);
   if (!manifestTag) throw new Error('Tag <manifest> tidak ditemukan di AndroidManifest.xml');
-  xml = xml.replace(manifestTag[0], `${manifestTag[0]}\\n    <uses-feature android:name="android.hardware.camera" android:required="false" />`);
+  xml = xml.replace(manifestTag[0], `${manifestTag[0]}\n    <uses-feature android:name="android.hardware.camera" android:required="false" />`);
 }
 
 await writeFile(manifestPath, xml, 'utf8');
