@@ -14,13 +14,15 @@
 
   function applyTheme(theme) {
     const value = theme === 'dark' ? 'dark' : 'light';
-    root.setAttribute('data-theme', value);
-    root.style.colorScheme = value;
+    if (root.getAttribute('data-theme') !== value) root.setAttribute('data-theme', value);
+    if (root.style.colorScheme !== value) root.style.colorScheme = value;
     const button = document.getElementById('themeToggle');
     if (button) {
-      button.textContent = value === 'dark' ? '☀ Light mode' : '☾ Dark mode';
-      button.setAttribute('aria-label', value === 'dark' ? 'Aktifkan light mode' : 'Aktifkan dark mode');
-      button.setAttribute('aria-pressed', String(value === 'dark'));
+      const label = value === 'dark' ? '☀ Light mode' : '☾ Dark mode';
+      const ariaLabel = value === 'dark' ? 'Aktifkan light mode' : 'Aktifkan dark mode';
+      if (button.textContent !== label) button.textContent = label;
+      if (button.getAttribute('aria-label') !== ariaLabel) button.setAttribute('aria-label', ariaLabel);
+      if (button.getAttribute('aria-pressed') !== String(value === 'dark')) button.setAttribute('aria-pressed', String(value === 'dark'));
     }
     try { localStorage.setItem(KEY, value); } catch (_) {}
   }
