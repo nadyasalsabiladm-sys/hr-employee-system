@@ -8568,8 +8568,8 @@ console.log(
 
 (function () {
   const TZ = 'Asia/Jakarta';
-  const TRACK_INTERVAL_MS = 120000; // kirim lokasi tiap 2 menit selama tugas luar aktif
-  const FT = { timer: null, native: false, nativeStarting: false, generation: 0, busy: false, wakeLock: null, lastSent: null, lastError: null, keepAwake: true };
+  const TRACK_INTERVAL_MS = 30000; // interval browser ketika halaman aktif
+  const FT = { timer: null, native: false, nativeStarting: false, generation: 0, busy: false, queuedPoint: null, wakeLock: null, lastSent: null, lastError: null, keepAwake: true };
 
   /* ---------- Util ---------- */
   const errText = err =>
@@ -8619,13 +8619,41 @@ console.log(
   }
 
   async function sendCoordinates(lat, lng, acc) {
-    if (FT.busy || !empPortal.token) return;
+    if (!empPortal.token) return;
+    const nLat = Number(lat), nLng = Number(lng), nAcc = Number(acc || 0);
+    if (!Number.isFinite(nLat) || !Number.isFinite(nLng) || nLat < -90 || nLat > 90 || nLng < -180 || nLng > 180) {
+      FT.lastError = 'Koordinat dari perangkat tidak valid.';
+      updateStatusLine();
+      return;
+    }
+    // Simpan titik terbaru jika permintaan sebelumnya masih berlangsung.
+    if (FT.busy) {
+      FT.queuedPoint = { lat: nLat, lng: nLng, acc: nAcc };
+      return;
+    }
     FT.busy = true;
+    let point = { lat: nLat, lng: nLng, acc: nAcc };
     try {
-      const r = await empRpc('employee_field_track_point', { p_latitude: lat, p_longitude: lng, p_accuracy: acc });
-      if (r && r.saved === false && r.reason === 'no_active_trip') { stopTracking(); }
-      else if (r && r.saved) { FT.lastSent = new Date(); }
-      FT.lastError = null;
+      while (point && empPortal.token) {
+        const current = point;
+        point = null;
+        const r = await empRpc('employee_field_track_point', {
+          p_latitude: current.lat, p_longitude: current.lng, p_accuracy: current.acc
+        });
+        if (r && r.saved === false && r.reason === 'no_active_trip') {
+          FT.queuedPoint = null;
+          stopTracking();
+        } else if (r && r.saved) {
+          FT.lastSent = new Date();
+          FT.lastError = null;
+        } else {
+          FT.lastError = 'Server belum mengonfirmasi penyimpanan lokasi.';
+        }
+        if (FT.queuedPoint) {
+          point = FT.queuedPoint;
+          FT.queuedPoint = null;
+        }
+      }
     } catch (err) {
       FT.lastError = errText(err);
     } finally {
@@ -8673,7 +8701,13 @@ console.log(
         await bridge.start(
           location => {
             if (!empPortal.token || !FT.native) return;
-            sendCoordinates(location.latitude, location.longitude, location.accuracy);
+            const coords = location && location.coords ? location.coords : location;
+            if (!coords) return;
+            sendCoordinates(
+              coords.latitude ?? coords.lat,
+              coords.longitude ?? coords.lng ?? coords.lon,
+              coords.accuracy ?? coords.accuracy_meter ?? coords.accuracyMeter
+            );
           },
           error => {
             FT.lastError = 'Pelacakan latar belakang: ' + ((error && error.message) || 'izin/lokasi tidak tersedia.');
