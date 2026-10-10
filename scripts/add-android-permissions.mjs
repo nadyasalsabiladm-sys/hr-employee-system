@@ -1,19 +1,37 @@
 import { readFile, writeFile } from 'node:fs/promises';
 
-const path = 'android/app/src/main/AndroidManifest.xml';
-let xml = await readFile(path, 'utf8');
+const manifestPath = 'android/app/src/main/AndroidManifest.xml';
+let xml = await readFile(manifestPath, 'utf8');
+
 const permissions = [
   'android.permission.CAMERA',
   'android.permission.ACCESS_COARSE_LOCATION',
-  'android.permission.ACCESS_FINE_LOCATION'
+  'android.permission.ACCESS_FINE_LOCATION',
 ];
-const missing = permissions.filter(p => !xml.includes(`android:name="${p}"`));
+
+const missing = permissions.filter(permission =>
+  !xml.includes(`android:name="${permission}"`)
+);
+
 if (missing.length) {
-  const declarations = missing.map(p => `    <uses-permission android:name="${p}" />`).join('\\n') + '\\n';
-  xml = xml.replace('<manifest ', '<manifest ');
-  const manifestEnd = xml.indexOf('>');
-  if (manifestEnd < 0) throw new Error('Tag manifest tidak ditemukan');
-  xml = xml.slice(0, manifestEnd + 1) + '\\n' + declarations + xml.slice(manifestEnd + 1);
-  await writeFile(path, xml);
+  const declarations = missing
+    .map(permission => `    <uses-permission android:name="${permission}" />`)
+    .join('\n');
+
+  const manifestTag = xml.match(/<manifest\b[^>]*>/);
+  if (!manifestTag) throw new Error('Tag <manifest> tidak ditemukan di AndroidManifest.xml');
+
+  xml = xml.replace(manifestTag[0], `${manifestTag[0]}\n${declarations}`);
 }
-console.log('Izin Android kamera dan lokasi telah disiapkan di AndroidManifest.xml');
+
+if (!xml.includes('android.hardware.camera')) {
+  const manifestTag = xml.match(/<manifest\b[^>]*>/);
+  if (!manifestTag) throw new Error('Tag <manifest> tidak ditemukan di AndroidManifest.xml');
+  xml = xml.replace(
+    manifestTag[0],
+    `${manifestTag[0]}\n    <uses-feature android:name="android.hardware.camera" android:required="false" />`
+  );
+}
+
+await writeFile(manifestPath, xml, 'utf8');
+console.log('AndroidManifest.xml: izin kamera dan lokasi sudah ditambahkan.');
