@@ -9020,9 +9020,9 @@ console.log(
     box.querySelectorAll('[data-ft-trip]').forEach(b => b.onclick = () => showTrip(b.dataset.ftTrip));
   }
 
-  async function showTrip(id) {
+  async function showTrip(id, fromAutoRefresh = false) {
     HR.selectedTripId = id;
-    if (HR.refreshTimer) { clearInterval(HR.refreshTimer); HR.refreshTimer = null; }
+    if (!fromAutoRefresh && HR.refreshTimer) { clearInterval(HR.refreshTimer); HR.refreshTimer = null; }
     const holder = $('#ftDetail');
     if (!holder) return;
     holder.innerHTML = '<div class="card empty">Memuat peta...</div>';
@@ -9094,7 +9094,7 @@ console.log(
       holder.scrollIntoView({ behavior: 'smooth', block: 'start' });
       if (trip.status === 'active') {
         HR.refreshTimer = setInterval(() => {
-          if (state.view === 'field_trips' && HR.selectedTripId === id && document.getElementById('ftDetail')) showTrip(id);
+          if (state.view === 'field_trips' && HR.selectedTripId === id && document.getElementById('ftDetail')) showTrip(id, true);
           else { clearInterval(HR.refreshTimer); HR.refreshTimer = null; }
         }, 15000);
       }
