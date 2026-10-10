@@ -9073,15 +9073,24 @@ console.log(
       });
       if (all.length) map.fitBounds(L.latLngBounds(all), { padding: [30, 30], maxZoom: 17 });
       else map.setView([-6.2, 106.8], 11);
+      // Tampilkan lokasi terakhir secara jelas pada marker khusus.
       const latest = points.length ? points[points.length - 1] : null;
       const liveInfo = document.createElement('div');
       liveInfo.className = 'muted';
       liveInfo.style.margin = '6px 0';
       liveInfo.textContent = trip.status === 'active'
-        ? 'Pembaruan otomatis setiap 15 detik · Lokasi terakhir: ' + (latest && latest.captured_at ? fmtDateTime(latest.captured_at, TZ) : 'belum tersedia')
+        ? 'Pembaruan otomatis setiap 15 detik · Lokasi terakhir: ' + (latest && (latest.captured_at || latest.created_at) ? fmtDateTime(latest.captured_at || latest.created_at, TZ) : 'belum tersedia')
         : 'Tugas sudah tidak aktif; lokasi tidak diperbarui lagi.';
       const heading = holder.querySelector('.section-head');
       if (heading) heading.insertAdjacentElement('afterend', liveInfo);
+      if (trip.status === 'active') {
+        const latestPoint = points.length ? points[points.length - 1] : null;
+        if (latestPoint && Number.isFinite(Number(latestPoint.lat)) && Number.isFinite(Number(latestPoint.lng))) {
+          L.circleMarker([Number(latestPoint.lat), Number(latestPoint.lng)], {
+            radius: 12, color: '#1d4ed8', weight: 4, fillColor: '#60a5fa', fillOpacity: 0.65
+          }).addTo(map).bindTooltip('LIVE · Lokasi terakhir', { permanent: true, direction: 'top' });
+        }
+      }
       holder.scrollIntoView({ behavior: 'smooth', block: 'start' });
       if (trip.status === 'active') {
         HR.refreshTimer = setInterval(() => {
