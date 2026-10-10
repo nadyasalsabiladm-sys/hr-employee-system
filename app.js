@@ -8881,7 +8881,7 @@ console.log(
   /* ============================================================
      HR / ADMIN: daftar tugas luar + peta
      ============================================================ */
-  const HR = { from: null, to: null, rows: [], map: null };
+  const HR = { from: null, to: null, rows: [], map: null, selectedTripId: null, refreshTimer: null };
 
   function hrInit() {
     if (!HR.from) { HR.from = todayJakarta(); HR.to = todayJakarta(); }
@@ -8923,6 +8923,8 @@ console.log(
   }
 
   async function renderHr() {
+    if (HR.refreshTimer) { clearInterval(HR.refreshTimer); HR.refreshTimer = null; }
+    HR.selectedTripId = null;
     const box = $('#content');
     if (!box) return;
     hrInit();
@@ -8985,6 +8987,8 @@ console.log(
   }
 
   async function showTrip(id) {
+    HR.selectedTripId = id;
+    if (HR.refreshTimer) { clearInterval(HR.refreshTimer); HR.refreshTimer = null; }
     const holder = $('#ftDetail');
     if (!holder) return;
     holder.innerHTML = '<div class="card empty">Memuat peta...</div>';
@@ -9035,7 +9039,22 @@ console.log(
       });
       if (all.length) map.fitBounds(L.latLngBounds(all), { padding: [30, 30], maxZoom: 17 });
       else map.setView([-6.2, 106.8], 11);
+      const latest = points.length ? points[points.length - 1] : null;
+      const liveInfo = document.createElement('div');
+      liveInfo.className = 'muted';
+      liveInfo.style.margin = '6px 0';
+      liveInfo.textContent = trip.status === 'active'
+        ? 'Pembaruan otomatis setiap 15 detik · Lokasi terakhir: ' + (latest && latest.captured_at ? fmtDateTime(latest.captured_at, TZ) : 'belum tersedia')
+        : 'Tugas sudah tidak aktif; lokasi tidak diperbarui lagi.';
+      const heading = holder.querySelector('.section-head');
+      if (heading) heading.insertAdjacentElement('afterend', liveInfo);
       holder.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      if (trip.status === 'active') {
+        HR.refreshTimer = setInterval(() => {
+          if (state.view === 'field_trips' && HR.selectedTripId === id && document.getElementById('ftDetail')) showTrip(id);
+          else { clearInterval(HR.refreshTimer); HR.refreshTimer = null; }
+        }, 15000);
+      }
     } catch (err) {
       holder.innerHTML = `<div class="card"><div class="error">${esc(friendlyError(err))}</div></div>`;
     }
