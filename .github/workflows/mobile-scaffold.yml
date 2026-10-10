@@ -2,9 +2,9 @@ name: Mobile scaffold validation
 
 on:
   push:
-    branches: [phase21-mobile-prep]
+    branches: [phase21-mobile-prep, phase22-premium-ui]
   pull_request:
-    branches: [main, phase21-mobile-prep]
+    branches: [main, phase21-mobile-prep, phase22-premium-ui]
 
 jobs:
   validate-web-assets:
@@ -23,4 +23,5 @@ jobs:
           node --check app.js
           node --check config.js
           node --check spv-management.js
+          node --check theme.js
           node --check scripts/copy-web-assets.mjs
