@@ -9032,7 +9032,6 @@ console.log(
     if (!fromAutoRefresh && HR.refreshTimer) { clearInterval(HR.refreshTimer); HR.refreshTimer = null; }
     const holder = $('#ftDetail');
     if (!holder) return;
-    // Jangan mengosongkan panel saat refresh otomatis agar tampilan tidak berkedip.
     if (!fromAutoRefresh) holder.innerHTML = '<div class="card empty">Memuat peta...</div>';
     try {
       const [{ data, error }] = await Promise.all([sb.rpc('hr_field_trip_detail', { p_trip_id: id }), loadLeaflet()]);
@@ -9041,71 +9040,112 @@ console.log(
       const points = data.points || [];
       const visits = data.visits || [];
       const km = routeKm(points);
-      // Hentikan timer segera setelah server mengonfirmasi tugas sudah tidak aktif.
       if (trip.status !== 'active' && HR.refreshTimer) {
         clearInterval(HR.refreshTimer);
         HR.refreshTimer = null;
       }
 
-      holder.innerHTML = `<div class="section">
-        <div class="section-head"><h2>${esc(trip.employee_name || '-')} — ${esc(trip.purpose || '-')}</h2></div>
-        <div class="muted">Mulai ${esc(fmtDateTime(trip.started_at, TZ))} · ${trip.ended_at ? 'Selesai ' + esc(fmtDateTime(trip.ended_at, TZ)) : 'Masih aktif'} · ${points.length} titik · ±${km.toFixed(1)} km (perkiraan)</div>
-        <div id="ftMap" style="height:420px;border-radius:12px;margin:12px 0"></div>
-        <div class="table-wrap"><table class="table">
-          <thead><tr><th>#</th><th>Waktu</th><th>Tempat</th><th>Catatan</th><th>Akurasi</th></tr></thead>
-          <tbody>${visits.length ? visits.map((v, i) => `<tr>
-            <td>${i + 1}</td><td>${esc(fmtTime(v.at, TZ))}</td><td>${esc(v.place || '-')}</td>
-            <td>${esc(v.notes || '-')}</td><td>${v.acc != null ? '±' + Math.round(Number(v.acc)) + ' m' : '-'}</td>
-          </tr>`).join('') : '<tr><td colspan="5" class="muted">Belum ada check-in kunjungan.</td></tr>'}</tbody>
-        </table></div></div>`;
-
-      if (HR.map) { HR.map.remove(); HR.map = null; }
-      const map = L.map('ftMap');
-      HR.map = map;
-      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap' }).addTo(map);
-
-      const all = [];
-      const line = points.map(p => [Number(p.lat), Number(p.lng)]);
-      if (line.length) {
-        L.polyline(line, { weight: 4, opacity: 0.8 }).addTo(map);
-        L.circleMarker(line[0], { radius: 8, color: '#15803d', fillColor: '#22c55e', fillOpacity: 1 }).addTo(map).bindTooltip('Mulai');
-        const last = line[line.length - 1];
-        L.circleMarker(last, { radius: 8, color: '#b91c1c', fillColor: '#ef4444', fillOpacity: 1 }).addTo(map)
-          .bindTooltip(trip.status === 'active' ? 'Lokasi terakhir' : 'Selesai');
-        all.push(...line);
-      }
-      visits.forEach((v, i) => {
-        const ll = [Number(v.lat), Number(v.lng)];
-        all.push(ll);
-        const icon = L.divIcon({
-          className: '',
-          html: `<div style="background:#2563eb;color:#fff;border-radius:50%;width:26px;height:26px;line-height:26px;text-align:center;font-weight:700;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)">${i + 1}</div>`,
-          iconSize: [26, 26], iconAnchor: [13, 13]
-        });
-        L.marker(ll, { icon }).addTo(map).bindTooltip(`${i + 1}. ${esc(v.place || '-')}`);
-      });
-      if (all.length) map.fitBounds(L.latLngBounds(all), { padding: [30, 30], maxZoom: 17 });
-      else map.setView([-6.2, 106.8], 11);
-      // Tampilkan lokasi terakhir secara jelas pada marker khusus.
       const latest = points.length ? points[points.length - 1] : null;
-      const liveInfo = document.createElement('div');
-      liveInfo.className = 'muted';
-      liveInfo.style.margin = '6px 0';
-      liveInfo.textContent = trip.status === 'active'
-        ? 'Pembaruan otomatis setiap 15 detik · Lokasi terakhir: ' + (latest && (latest.captured_at || latest.created_at) ? fmtDateTime(latest.captured_at || latest.created_at, TZ) : 'belum tersedia')
+      const latestLat = latest ? Number(latest.lat) : NaN;
+      const latestLng = latest ? Number(latest.lng) : NaN;
+      const hasLatest = Number.isFinite(latestLat) && Number.isFinite(latestLng)
+        && latestLat >= -90 && latestLat <= 90 && latestLng >= -180 && latestLng <= 180;
+      const latestAt = latest && (latest.captured_at || latest.created_at);
+      const summaryText = 'Mulai ' + fmtDateTime(trip.started_at, TZ) + ' · '
+        + (trip.ended_at ? 'Selesai ' + fmtDateTime(trip.ended_at, TZ) : 'Masih aktif')
+        + ' · ' + points.length + ' titik · ±' + km.toFixed(1) + ' km (perkiraan)';
+      const liveText = trip.status === 'active'
+        ? 'Pembaruan otomatis setiap 15 detik · Lokasi terakhir: ' + (latestAt ? fmtDateTime(latestAt, TZ) : 'belum tersedia')
         : 'Tugas sudah tidak aktif; lokasi tidak diperbarui lagi.';
-      const heading = holder.querySelector('.section-head');
-      if (heading) heading.insertAdjacentElement('afterend', liveInfo);
-      if (trip.status === 'active') {
-        const latestPoint = points.length ? points[points.length - 1] : null;
-        if (latestPoint && Number.isFinite(Number(latestPoint.lat)) && Number.isFinite(Number(latestPoint.lng))) {
-          L.circleMarker([Number(latestPoint.lat), Number(latestPoint.lng)], {
-            radius: 12, color: '#1d4ed8', weight: 4, fillColor: '#60a5fa', fillOpacity: 0.65
-          }).addTo(map).bindTooltip('LIVE · Lokasi terakhir', { permanent: true, direction: 'top' });
+
+      // Refresh otomatis memperbarui layer yang berubah tanpa menghancurkan peta,
+      // sehingga zoom, posisi layar, dan interaksi HR tetap terjaga.
+      const canUpdateExistingMap = fromAutoRefresh && HR.map && HR.mapTripId === id
+        && document.getElementById('ftMap') && HR.routeLine && HR.visitLayer;
+      if (canUpdateExistingMap) {
+        const line = points.map(p => [Number(p.lat), Number(p.lng)])
+          .filter(ll => Number.isFinite(ll[0]) && Number.isFinite(ll[1]) && Math.abs(ll[0]) <= 90 && Math.abs(ll[1]) <= 180);
+        HR.routeLine.setLatLngs(line);
+        HR.visitLayer.clearLayers();
+        visits.forEach((v, i) => {
+          const ll = [Number(v.lat), Number(v.lng)];
+          if (!Number.isFinite(ll[0]) || !Number.isFinite(ll[1]) || Math.abs(ll[0]) > 90 || Math.abs(ll[1]) > 180) return;
+          const icon = L.divIcon({
+            className: '',
+            html: '<div style="background:#2563eb;color:#fff;border-radius:50%;width:26px;height:26px;line-height:26px;text-align:center;font-weight:700;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)">' + (i + 1) + '</div>',
+            iconSize: [26, 26], iconAnchor: [13, 13]
+          });
+          L.marker(ll, { icon }).addTo(HR.visitLayer).bindTooltip((i + 1) + '. ' + esc(v.place || '-'));
+        });
+        if (line.length) {
+          HR.startMarker.setLatLng(line[0]);
+          HR.startMarker.setTooltipContent('Mulai');
         }
+        if (hasLatest) {
+          if (HR.latestMarker) HR.latestMarker.setLatLng([latestLat, latestLng]);
+          else HR.latestMarker = L.circleMarker([latestLat, latestLng], {
+            radius: 12, color: '#1d4ed8', weight: 4, fillColor: '#60a5fa', fillOpacity: 0.65
+          }).addTo(HR.map).bindTooltip('LIVE · Lokasi terakhir', { permanent: true, direction: 'top' });
+          HR.latestMarker.setTooltipContent(trip.status === 'active' ? 'LIVE · Lokasi terakhir' : 'Selesai');
+          // Ikuti lokasi baru hanya jika marker bergerak cukup jauh; jangan reset zoom.
+          const center = HR.map.getCenter();
+          if (center.distanceTo(L.latLng(latestLat, latestLng)) > 180) HR.map.panTo([latestLat, latestLng], { animate: true, duration: 0.6 });
+        }
+        const summary = holder.querySelector('[data-ft-summary]');
+        if (summary) summary.textContent = summaryText;
+        const liveInfo = holder.querySelector('[data-ft-live-info]');
+        if (liveInfo) liveInfo.textContent = liveText;
+      } else {
+        holder.innerHTML = `<div class="section">
+          <div class="section-head"><h2>${esc(trip.employee_name || '-')} — ${esc(trip.purpose || '-')}</h2></div>
+          <div class="muted" data-ft-summary>${esc(summaryText)}</div>
+          <div id="ftMap" style="height:420px;border-radius:12px;margin:12px 0"></div>
+          <div class="muted" data-ft-live-info style="margin:6px 0">${esc(liveText)}</div>
+          <div class="table-wrap"><table class="table">
+            <thead><tr><th>#</th><th>Waktu</th><th>Tempat</th><th>Catatan</th><th>Akurasi</th></tr></thead>
+            <tbody>${visits.length ? visits.map((v, i) => `<tr>
+              <td>${i + 1}</td><td>${esc(fmtTime(v.at, TZ))}</td><td>${esc(v.place || '-')}</td>
+              <td>${esc(v.notes || '-')}</td><td>${v.acc != null ? '±' + Math.round(Number(v.acc)) + ' m' : '-'}</td>
+            </tr>`).join('') : '<tr><td colspan="5" class="muted">Belum ada check-in kunjungan.</td></tr>'}</tbody>
+          </table></div></div>`;
+
+        if (HR.map) { HR.map.remove(); HR.map = null; }
+        const map = L.map('ftMap');
+        HR.map = map;
+        HR.mapTripId = id;
+        L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap' }).addTo(map);
+        const line = points.map(p => [Number(p.lat), Number(p.lng)])
+          .filter(ll => Number.isFinite(ll[0]) && Number.isFinite(ll[1]) && Math.abs(ll[0]) <= 90 && Math.abs(ll[1]) <= 180);
+        HR.routeLine = L.polyline(line, { weight: 4, opacity: 0.8 }).addTo(map);
+        HR.visitLayer = L.layerGroup().addTo(map);
+        HR.startMarker = null;
+        HR.latestMarker = null;
+        const all = [...line];
+        if (line.length) {
+          HR.startMarker = L.circleMarker(line[0], { radius: 8, color: '#15803d', fillColor: '#22c55e', fillOpacity: 1 })
+            .addTo(map).bindTooltip('Mulai');
+        }
+        visits.forEach((v, i) => {
+          const ll = [Number(v.lat), Number(v.lng)];
+          if (!Number.isFinite(ll[0]) || !Number.isFinite(ll[1]) || Math.abs(ll[0]) > 90 || Math.abs(ll[1]) > 180) return;
+          all.push(ll);
+          const icon = L.divIcon({
+            className: '',
+            html: '<div style="background:#2563eb;color:#fff;border-radius:50%;width:26px;height:26px;line-height:26px;text-align:center;font-weight:700;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)">' + (i + 1) + '</div>',
+            iconSize: [26, 26], iconAnchor: [13, 13]
+          });
+          L.marker(ll, { icon }).addTo(HR.visitLayer).bindTooltip((i + 1) + '. ' + esc(v.place || '-'));
+        });
+        if (hasLatest) {
+          HR.latestMarker = L.circleMarker([latestLat, latestLng], {
+            radius: 12, color: '#1d4ed8', weight: 4, fillColor: '#60a5fa', fillOpacity: 0.65
+          }).addTo(map).bindTooltip(trip.status === 'active' ? 'LIVE · Lokasi terakhir' : 'Selesai', { permanent: true, direction: 'top' });
+        }
+        if (all.length) map.fitBounds(L.latLngBounds(all), { padding: [30, 30], maxZoom: 17 });
+        else map.setView([-6.2, 106.8], 11);
+        if (!fromAutoRefresh) holder.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }
-      if (!fromAutoRefresh) holder.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      // Satu timer saja per perjalanan; jangan membuat timer baru setiap refresh.
+
       if (trip.status === 'active' && !HR.refreshTimer) {
         HR.refreshTimer = setInterval(() => {
           if (state.view === 'field_trips' && HR.selectedTripId === id && document.getElementById('ftDetail')) showTrip(id, true);
