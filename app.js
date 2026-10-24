@@ -9032,7 +9032,8 @@ console.log(
     if (!fromAutoRefresh && HR.refreshTimer) { clearInterval(HR.refreshTimer); HR.refreshTimer = null; }
     const holder = $('#ftDetail');
     if (!holder) return;
-    holder.innerHTML = '<div class="card empty">Memuat peta...</div>';
+    // Jangan mengosongkan panel saat refresh otomatis agar tampilan tidak berkedip.
+    if (!fromAutoRefresh) holder.innerHTML = '<div class="card empty">Memuat peta...</div>';
     try {
       const [{ data, error }] = await Promise.all([sb.rpc('hr_field_trip_detail', { p_trip_id: id }), loadLeaflet()]);
       if (error) throw error;
@@ -9040,6 +9041,11 @@ console.log(
       const points = data.points || [];
       const visits = data.visits || [];
       const km = routeKm(points);
+      // Hentikan timer segera setelah server mengonfirmasi tugas sudah tidak aktif.
+      if (trip.status !== 'active' && HR.refreshTimer) {
+        clearInterval(HR.refreshTimer);
+        HR.refreshTimer = null;
+      }
 
       holder.innerHTML = `<div class="section">
         <div class="section-head"><h2>${esc(trip.employee_name || '-')} — ${esc(trip.purpose || '-')}</h2></div>
@@ -9098,8 +9104,9 @@ console.log(
           }).addTo(map).bindTooltip('LIVE · Lokasi terakhir', { permanent: true, direction: 'top' });
         }
       }
-      holder.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      if (trip.status === 'active') {
+      if (!fromAutoRefresh) holder.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      // Satu timer saja per perjalanan; jangan membuat timer baru setiap refresh.
+      if (trip.status === 'active' && !HR.refreshTimer) {
         HR.refreshTimer = setInterval(() => {
           if (state.view === 'field_trips' && HR.selectedTripId === id && document.getElementById('ftDetail')) showTrip(id, true);
           else { clearInterval(HR.refreshTimer); HR.refreshTimer = null; }
