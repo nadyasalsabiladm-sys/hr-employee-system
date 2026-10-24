@@ -211,3 +211,49 @@ html[data-theme="dark"] .dash-rose .dash-metric-icon{background:#48232b;color:#f
 @media(max-width:1100px){.dash-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.dash-quick-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:760px){.dash-welcome{align-items:flex-start;flex-direction:column;padding:20px}.dash-attendance,.dash-two-col{grid-template-columns:1fr}.dash-panel{padding:16px}.dash-attendance{gap:18px}}
 @media(max-width:420px){.dash-metrics{gap:9px}.dash-metric{padding:13px}.dash-metric-icon{width:32px;height:32px;margin-bottom:10px}.dash-metric-value{font-size:28px}.dash-metric-note{font-size:10px}.dash-attendance-stats{gap:8px}.dash-attendance-stats>div{padding:9px 7px;grid-template-columns:8px 1fr auto;gap:5px;font-size:10px}.dash-quick-grid{gap:8px}.dash-quick{padding:12px}.dash-date{white-space:normal}}
+
+
+/* PHASE 23 - Mobile-friendly HR field tracking */
+@media (max-width: 768px) {
+  #ftDetail {
+    min-width: 0;
+    width: 100%;
+    overflow-wrap: anywhere;
+  }
+
+  #ftDetail .section {
+    min-width: 0;
+  }
+
+  #ftDetail #ftMap {
+    width: 100%;
+    height: min(68vh, 560px) !important;
+    min-height: 360px;
+    margin: 12px 0;
+    border-radius: 14px;
+    overflow: hidden;
+  }
+
+  #ftDetail .table-wrap,
+  #ftDetail .table-wrapper,
+  #ftDetail .table-wrap table {
+    max-width: 100%;
+  }
+
+  #ftDetail .table-wrap,
+  #ftDetail .table-wrapper {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  #ftDetail table {
+    min-width: 560px;
+  }
+}
+
+@media (max-width: 420px) {
+  #ftDetail #ftMap {
+    height: 62vh !important;
+    min-height: 320px;
+  }
+}
