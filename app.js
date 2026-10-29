@@ -8649,7 +8649,11 @@ console.log(
         if (r && r.saved === false && r.reason === 'no_active_trip') {
           FT.queuedPoint = null;
           stopTracking();
-        } else if (r && r.saved) {
+        } else if (r && r.saved === false && r.reason === 'too_soon') {
+          // Server intentionally rate-limits points to one every 20 seconds.
+          // This is an expected response, not a storage failure.
+          FT.lastError = null;
+        } else if (r && r.saved === true) {
           FT.lastSent = new Date();
           FT.lastError = null;
         } else {
