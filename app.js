@@ -9126,10 +9126,13 @@ console.log(
         const pointsBody = holder.querySelector('[data-ft-points-body]');
         if (pointsBody) pointsBody.innerHTML = points.length ? points.slice().reverse().map((p, i) => {
           const lat = Number(p.lat), lng = Number(p.lng), acc = p.acc;
+          const valid = Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180;
+          const mapsUrl = valid ? 'https://www.google.com/maps?q=' + encodeURIComponent(lat + ',' + lng) : '';
           return '<tr><td>' + (points.length - i) + '</td><td>' + esc(fmtDateTime(p.at || p.captured_at || p.created_at, TZ)) + '</td><td>' +
-            (Number.isFinite(lat) ? lat.toFixed(6) : '-') + '</td><td>' + (Number.isFinite(lng) ? lng.toFixed(6) : '-') +
-            '</td><td>' + (acc != null ? '±' + Math.round(Number(acc)) + ' m' : '-') + '</td></tr>';
-        }).join('') : '<tr><td colspan="5" class="muted">Belum ada titik GPS.</td></tr>';
+            (valid ? lat.toFixed(6) : '-') + '</td><td>' + (valid ? lng.toFixed(6) : '-') +
+            '</td><td>' + (acc != null ? '±' + Math.round(Number(acc)) + ' m' : '-') + '</td><td>' +
+            (valid ? '<a href="' + mapsUrl + '" target="_blank" rel="noopener noreferrer">Buka Google Maps ↗</a>' : '-') + '</td></tr>';
+        }).join('') : '<tr><td colspan="6" class="muted">Belum ada titik GPS.</td></tr>';
       } else {
         holder.innerHTML = `<div class="section">
           <div class="section-head"><h2>${esc(trip.employee_name || '-')} — ${esc(trip.purpose || '-')}</h2></div>
@@ -9145,13 +9148,16 @@ console.log(
           </table></div>
           <div class="section-head" style="margin-top:16px"><h3>Riwayat Titik GPS</h3></div>
           <div class="table-wrap"><table class="table">
-            <thead><tr><th>#</th><th>Waktu</th><th>Latitude</th><th>Longitude</th><th>Akurasi</th></tr></thead>
+            <thead><tr><th>#</th><th>Waktu</th><th>Latitude</th><th>Longitude</th><th>Akurasi</th><th>Peta</th></tr></thead>
             <tbody data-ft-points-body>${points.length ? points.slice().reverse().map((p, i) => {
               const lat = Number(p.lat), lng = Number(p.lng), acc = p.acc;
+              const valid = Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180;
+              const mapsUrl = valid ? 'https://www.google.com/maps?q=' + encodeURIComponent(lat + ',' + lng) : '';
               return '<tr><td>' + (points.length - i) + '</td><td>' + esc(fmtDateTime(p.at || p.captured_at || p.created_at, TZ)) + '</td><td>' +
-                (Number.isFinite(lat) ? lat.toFixed(6) : '-') + '</td><td>' + (Number.isFinite(lng) ? lng.toFixed(6) : '-') +
-                '</td><td>' + (acc != null ? '±' + Math.round(Number(acc)) + ' m' : '-') + '</td></tr>';
-            }).join('') : '<tr><td colspan="5" class="muted">Belum ada titik GPS.</td></tr>'}</tbody>
+                (valid ? lat.toFixed(6) : '-') + '</td><td>' + (valid ? lng.toFixed(6) : '-') +
+                '</td><td>' + (acc != null ? '±' + Math.round(Number(acc)) + ' m' : '-') + '</td><td>' +
+                (valid ? '<a href="' + mapsUrl + '" target="_blank" rel="noopener noreferrer">Buka Google Maps ↗</a>' : '-') + '</td></tr>';
+            }).join('') : '<tr><td colspan="6" class="muted">Belum ada titik GPS.</td></tr>'}</tbody>
           </table></div></div>`;
 
         if (HR.map) { HR.map.remove(); HR.map = null; }
