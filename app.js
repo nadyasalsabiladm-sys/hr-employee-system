@@ -159,10 +159,17 @@ function dashboard() {
   const warn = state.warnings.filter(w => w.status === 'active').length;
   const actEmp = state.employees.filter(e => e.employment_status === 'active');
   const inSet = new Set(state.attToday.filter(r => r.check_in_at).map(r => r.employee_id));
-  const attCards = `<div class="section"><div class="section-head"><h2>Absensi Hari Ini</h2><button class="btn btn-light" onclick="gotoView('attendance')">Buka Absensi</button></div><div class="cards"><div class="card"><div class="muted">Hadir Hari Ini</div><div class="metric">${inSet.size}</div></div><div class="card"><div class="muted">Belum Absen</div><div class="metric">${actEmp.filter(e => !inSet.has(e.id)).length}</div></div><div class="card"><div class="muted">Sudah Absen Keluar</div><div class="metric">${state.attToday.filter(r => r.check_out_at).length}</div></div><div class="card"><div class="muted">Terlambat</div><div class="metric">${state.attToday.filter(r => r.check_in_status === 'late').length}</div></div></div></div>`;
-  $('#content').innerHTML = `<div class="cards"><div class="card"><div class="muted">Karyawan Aktif</div><div class="metric">${active}</div></div><div class="card"><div class="muted">Kontrak ≤ 30 Hari</div><div class="metric">${exp}</div></div><div class="card"><div class="muted">Sedang Cuti</div><div class="metric">${onleave}</div></div><div class="card"><div class="muted">Teguran Aktif</div><div class="metric">${warn}</div></div></div>${attCards}<div class="section"><div class="section-head"><h2>Perusahaan</h2></div><div class="cards">${state.companies.map(c => `<div class="card"><div class="muted">${esc(c.name)}</div><div class="metric">${state.employees.filter(e => e.company_id === c.id).length}</div><div class="muted">karyawan</div></div>`).join('')}</div></div><div class="section"><div class="section-head"><h2>Karyawan Terbaru</h2><button class="btn btn-primary" onclick="showEmployeeForm()">+ Tambah Karyawan</button></div>${employeeTable(state.employees.slice(0, 8))}</div>`;
+  const notCheckedIn = actEmp.filter(e => !inSet.has(e.id)).length;
+  const checkedOut = state.attToday.filter(r => r.check_out_at).length;
+  const late = state.attToday.filter(r => r.check_in_status === 'late').length;
+  const attendanceRate = actEmp.length ? Math.min(100, Math.round((inSet.size / actEmp.length) * 100)) : 0;
+  const todayLabel = new Intl.DateTimeFormat('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: TZ }).format(new Date());
+  const metricCard = (icon, label, value, note, view, tone) => `<button type="button" class="dash-metric dash-${tone}" ${view ? `onclick="gotoView('${view}')"` : ''} ${view ? 'aria-label="Buka '+label+'"' : ''}><span class="dash-metric-icon" aria-hidden="true">${icon}</span><span class="dash-metric-label">${label}</span><strong class="dash-metric-value">${value}</strong><span class="dash-metric-note">${note}</span></button>`;
+  const attCards = `<section class="section dash-panel"><div class="section-head"><div><div class="dash-eyebrow">RINGKASAN HARIAN</div><h2>Absensi hari ini</h2><p class="muted">Pantau kehadiran tim dalam satu tampilan.</p></div><button class="btn btn-light" onclick="gotoView('attendance')">Lihat absensi <span aria-hidden="true">→</span></button></div><div class="dash-attendance"><div class="dash-attendance-main"><div class="dash-progress-head"><span>Tingkat kehadiran</span><strong>${attendanceRate}%</strong></div><div class="dash-progress" role="progressbar" aria-label="Tingkat kehadiran" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${attendanceRate}"><span style="width:${attendanceRate}%"></span></div><div class="muted">${inSet.size} dari ${actEmp.length} karyawan aktif sudah tercatat hadir</div></div><div class="dash-attendance-stats"><div><span class="dash-status-dot dash-dot-green"></span><span>Hadir</span><strong>${inSet.size}</strong></div><div><span class="dash-status-dot dash-dot-amber"></span><span>Belum absen</span><strong>${notCheckedIn}</strong></div><div><span class="dash-status-dot dash-dot-blue"></span><span>Sudah pulang</span><strong>${checkedOut}</strong></div><div><span class="dash-status-dot dash-dot-red"></span><span>Terlambat</span><strong>${late}</strong></div></div></div></section>`;
+  const quickActions = `<section class="section dash-panel"><div class="section-head"><div><div class="dash-eyebrow">AKSES CEPAT</div><h2>Menu operasional</h2></div></div><div class="dash-quick-grid"><button class="dash-quick" onclick="gotoView('employees')"><span>♙</span><b>Database karyawan</b><small>Data dan profil karyawan</small></button><button class="dash-quick" onclick="gotoView('leave')"><span>▣</span><b>Pengajuan cuti</b><small>Data dan status cuti</small></button><button class="dash-quick" onclick="gotoView('contracts')"><span>▤</span><b>Kontrak karyawan</b><small>Periksa masa kontrak</small></button><button class="dash-quick" onclick="gotoView('calendar')"><span>▦</span><b>Kalender kerja</b><small>Jadwal dan hari libur</small></button></div></section>`;
+  const companyCards = state.companies.length ? state.companies.map(c => `<div class="dash-company-card"><span class="dash-company-mark" aria-hidden="true">${esc(String(c.name || 'C').trim().slice(0,1).toUpperCase())}</span><div class="dash-company-info"><b>${esc(c.name)}</b><span class="muted">Total karyawan</span></div><strong>${state.employees.filter(e => e.company_id === c.id).length}</strong></div>`).join('') : '<div class="card empty">Belum ada data perusahaan.</div>';
+  $('#content').innerHTML = `<div class="dash-welcome"><div><div class="dash-eyebrow">HR EMPLOYEE SYSTEM</div><h2>Ringkasan operasional</h2><p>Selamat datang kembali. Berikut gambaran data HR hari ini.</p></div><div class="dash-date"><span aria-hidden="true">◷</span><span>${esc(todayLabel)}</span></div></div><div class="dash-metrics">${metricCard('♙','Karyawan aktif',active,'Karyawan berstatus aktif','employees','blue')}${metricCard('▤','Kontrak ≤ 30 hari',exp,'Perlu ditinjau','contracts','amber')}${metricCard('▣','Sedang cuti',onleave,'Cuti yang disetujui','leave','green')}${metricCard('!','Teguran aktif',warn,'Catatan yang masih aktif','warnings','rose')}</div>${attCards}<div class="dash-two-col"><section class="section dash-panel"><div class="section-head"><div><div class="dash-eyebrow">ORGANISASI</div><h2>Perusahaan</h2></div><span class="badge badge-blue">${state.companies.length} perusahaan</span></div><div class="dash-company-list">${companyCards}</div></section><section class="section dash-panel"><div class="section-head"><div><div class="dash-eyebrow">TINDAKAN CEPAT</div><h2>Perlu perhatian</h2></div></div><div class="dash-alert-list"><button onclick="gotoView('attendance')"><span class="dash-alert-icon dash-dot-amber">◷</span><span><b>${notCheckedIn} karyawan</b><small>Belum tercatat absen masuk</small></span><span class="dash-alert-arrow">→</span></button><button onclick="gotoView('contracts')"><span class="dash-alert-icon dash-dot-blue">▤</span><span><b>${exp} kontrak</b><small>Berakhir dalam 30 hari</small></span><span class="dash-alert-arrow">→</span></button><button onclick="gotoView('warnings')"><span class="dash-alert-icon dash-dot-red">!</span><span><b>${warn} teguran</b><small>Catatan teguran aktif</small></span><span class="dash-alert-arrow">→</span></button></div></section></div>${quickActions}<section class="section dash-panel"><div class="section-head"><div><div class="dash-eyebrow">DATA TERBARU</div><h2>Karyawan terbaru</h2><p class="muted">Daftar karyawan yang tercatat di sistem.</p></div><button class="btn btn-primary" onclick="showEmployeeForm()">+ Tambah karyawan</button></div>${employeeTable(state.employees.slice(0, 8))}</section>`;
 }
-
 /* ---------- Karyawan ---------- */
 function employeeTable(rows) {
   if (!rows.length) return '<div class="card empty">Belum ada data karyawan.</div>';
@@ -8568,8 +8575,7 @@ console.log(
 
 (function () {
   const TZ = 'Asia/Jakarta';
-  const TRACK_INTERVAL_MS = 120000; // kirim lokasi tiap 2 menit selama tugas luar aktif
-  const FT = { timer: null, busy: false, wakeLock: null, lastSent: null, lastError: null, keepAwake: true };
+  const FT = { timer: null, watchId: null, native: false, nativeStarting: false, generation: 0, busy: false, queuedPoint: null, wakeLock: null, lastSent: null, lastError: null, keepAwake: true };
 
   /* ---------- Util ---------- */
   const errText = err =>
@@ -8614,19 +8620,50 @@ console.log(
     const el = document.getElementById('ftStatusLine');
     if (!el) return;
     const sent = FT.lastSent ? fmtDateTime(FT.lastSent.toISOString(), TZ) : 'belum ada';
-    el.innerHTML = `Pelacakan: <b>${FT.timer ? 'aktif' : 'tidak aktif'}</b> · Lokasi terakhir terkirim: ${esc(sent)}` +
+    el.innerHTML = `Pelacakan: <b>${(FT.timer || FT.watchId !== null || FT.native || FT.nativeStarting) ? 'aktif' : 'tidak aktif'}</b> · Lokasi terakhir terkirim: ${esc(sent)}` +
       (FT.lastError ? `<div class="error">${esc(FT.lastError)}</div>` : '');
   }
 
-  async function sendPoint() {
-    if (FT.busy || !empPortal.token) return;
+  async function sendCoordinates(lat, lng, acc) {
+    if (!empPortal.token) return;
+    const nLat = Number(lat), nLng = Number(lng), nAcc = Number(acc || 0);
+    if (!Number.isFinite(nLat) || !Number.isFinite(nLng) || nLat < -90 || nLat > 90 || nLng < -180 || nLng > 180) {
+      FT.lastError = 'Koordinat dari perangkat tidak valid.';
+      updateStatusLine();
+      return;
+    }
+    // Simpan titik terbaru jika permintaan sebelumnya masih berlangsung.
+    if (FT.busy) {
+      FT.queuedPoint = { lat: nLat, lng: nLng, acc: nAcc };
+      return;
+    }
     FT.busy = true;
+    let point = { lat: nLat, lng: nLng, acc: nAcc };
     try {
-      const p = await getPos();
-      const r = await empRpc('employee_field_track_point', { p_latitude: p.lat, p_longitude: p.lng, p_accuracy: p.acc });
-      if (r && r.saved === false && r.reason === 'no_active_trip') { stopTracking(); }
-      else if (r && r.saved) { FT.lastSent = new Date(); }
-      FT.lastError = null;
+      while (point && empPortal.token) {
+        const current = point;
+        point = null;
+        const r = await empRpc('employee_field_track_point', {
+          p_latitude: current.lat, p_longitude: current.lng, p_accuracy: current.acc
+        });
+        if (r && r.saved === false && r.reason === 'no_active_trip') {
+          FT.queuedPoint = null;
+          stopTracking();
+        } else if (r && r.saved === false && r.reason === 'too_soon') {
+          // Server intentionally rate-limits points to one every 20 seconds.
+          // This is an expected response, not a storage failure.
+          FT.lastError = null;
+        } else if (r && r.saved === true) {
+          FT.lastSent = new Date();
+          FT.lastError = null;
+        } else {
+          FT.lastError = 'Server belum mengonfirmasi penyimpanan lokasi.';
+        }
+        if (FT.queuedPoint) {
+          point = FT.queuedPoint;
+          FT.queuedPoint = null;
+        }
+      }
     } catch (err) {
       FT.lastError = errText(err);
     } finally {
@@ -8635,25 +8672,110 @@ console.log(
     }
   }
 
+  async function sendPoint() {
+    try {
+      const p = await getPos();
+      await sendCoordinates(p.lat, p.lng, p.acc);
+    } catch (err) {
+      FT.lastError = errText(err);
+      updateStatusLine();
+    }
+  }
+
   function stopTracking() {
     if (FT.timer) clearInterval(FT.timer);
     FT.timer = null;
+    if (FT.watchId !== null && navigator.geolocation) navigator.geolocation.clearWatch(FT.watchId);
+    FT.watchId = null;
+    FT.generation += 1;
+    FT.nativeStarting = false;
+    const wasNative = FT.native;
+    FT.native = false;
     releaseWakeLock();
+    if (window.HRISBackgroundLocation && (wasNative || FT.generation > 0)) {
+      window.HRISBackgroundLocation.stop().catch(err => {
+        FT.lastError = 'Pelacakan native gagal dihentikan dengan bersih.';
+        updateStatusLine();
+        console.warn('[HRIS background location] stop failed', err);
+      });
+    }
+    updateStatusLine();
   }
 
-  function startTracking() {
-    stopTracking();
-    FT.timer = setInterval(sendPoint, TRACK_INTERVAL_MS);
+  async function startTracking() {
+    if (FT.timer || FT.watchId !== null || FT.native || FT.nativeStarting) return;
+    const bridge = window.HRISBackgroundLocation;
+    if (bridge && bridge.isNative()) {
+      FT.nativeStarting = true;
+      const startGeneration = FT.generation;
+      updateStatusLine();
+      try {
+        await bridge.start(
+          location => {
+            if (!empPortal.token || !FT.native) return;
+            const coords = location && location.coords ? location.coords : location;
+            if (!coords) return;
+            sendCoordinates(
+              coords.latitude ?? coords.lat,
+              coords.longitude ?? coords.lng ?? coords.lon,
+              coords.accuracy ?? coords.accuracy_meter ?? coords.accuracyMeter
+            );
+          },
+          error => {
+            FT.lastError = 'Pelacakan latar belakang: ' + ((error && error.message) || 'izin/lokasi tidak tersedia.');
+            updateStatusLine();
+          }
+        );
+        if (startGeneration !== FT.generation || !empPortal.token) {
+          await bridge.stop();
+          return;
+        }
+        FT.native = true;
+        FT.lastError = null;
+      } catch (err) {
+        FT.lastError = 'Pelacakan latar belakang belum dapat dimulai: ' + ((err && err.message) || 'periksa izin lokasi.');
+        FT.native = false;
+      } finally {
+        FT.nativeStarting = false;
+        updateStatusLine();
+      }
+      return;
+    }
+    if (!navigator.geolocation) {
+      FT.lastError = 'Browser tidak mendukung lokasi (GPS).';
+      updateStatusLine();
+      return;
+    }
+    // Browser: kirim titik setiap kali GPS melaporkan perubahan posisi.
+    // watchPosition lebih sesuai untuk perjalanan daripada polling getCurrentPosition.
+    FT.watchId = navigator.geolocation.watchPosition(
+      p => {
+        if (!empPortal.token || FT.watchId === null) return;
+        FT.lastError = null;
+        sendCoordinates(p.coords.latitude, p.coords.longitude, p.coords.accuracy);
+      },
+      err => {
+        FT.lastError = geoMsg(err);
+        updateStatusLine();
+      },
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 25000 }
+    );
     acquireWakeLock();
+    updateStatusLine();
+    // Ambil titik awal segera, tidak perlu menunggu callback pertama watchPosition.
+    sendPoint();
   }
 
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && FT.timer) { acquireWakeLock(); sendPoint(); }
+    if (document.visibilityState === 'visible' && (FT.timer || FT.watchId !== null)) {
+      acquireWakeLock();
+      sendPoint();
+    }
   });
 
   async function resumeIfActive() {
     try {
-      if (FT.timer || !empPortal.token) return;
+      if (FT.timer || FT.watchId !== null || FT.native || FT.nativeStarting || !empPortal.token) return;
       const st = await empRpc('employee_field_status');
       if (st && st.consented && st.active_trip) { startTracking(); sendPoint(); }
     } catch (_) { }
@@ -8669,7 +8791,7 @@ console.log(
           <li>Di luar waktu itu, lokasi Anda <b>tidak</b> dicatat.</li>
           <li>Data lokasi hanya dapat dilihat oleh HR/Admin untuk keperluan verifikasi tugas luar.</li>
           <li>Titik lokasi dihapus otomatis setelah 90 hari.</li>
-          <li>Agar pelacakan berjalan, halaman ini harus tetap terbuka di HP Anda.</li>
+          <li>Pada aplikasi Android, lokasi dapat direkam di latar belakang selama tugas aktif dan akan ditampilkan sebagai notifikasi. Ketersediaannya bergantung pada izin perangkat, baterai, dan jaringan.</li>
         </ul>
       </div>
       <button class="btn btn-primary" id="ftConsent">Saya Mengerti dan Setuju</button></div>`;
@@ -8750,7 +8872,7 @@ console.log(
 
     // Tugas luar aktif
     box.innerHTML = activeHtml(st);
-    if (!FT.timer) startTracking();
+    if (!FT.timer && !FT.native && !FT.nativeStarting) startTracking();
     updateStatusLine();
 
     $('#ftAwake').onchange = e => {
@@ -8828,7 +8950,7 @@ console.log(
   /* ============================================================
      HR / ADMIN: daftar tugas luar + peta
      ============================================================ */
-  const HR = { from: null, to: null, rows: [], map: null };
+  const HR = { from: null, to: null, rows: [], map: null, selectedTripId: null, refreshTimer: null };
 
   function hrInit() {
     if (!HR.from) { HR.from = todayJakarta(); HR.to = todayJakarta(); }
@@ -8870,6 +8992,8 @@ console.log(
   }
 
   async function renderHr() {
+    if (HR.refreshTimer) { clearInterval(HR.refreshTimer); HR.refreshTimer = null; }
+    HR.selectedTripId = null;
     const box = $('#content');
     if (!box) return;
     hrInit();
@@ -8931,10 +9055,12 @@ console.log(
     box.querySelectorAll('[data-ft-trip]').forEach(b => b.onclick = () => showTrip(b.dataset.ftTrip));
   }
 
-  async function showTrip(id) {
+  async function showTrip(id, fromAutoRefresh = false) {
+    HR.selectedTripId = id;
+    if (!fromAutoRefresh && HR.refreshTimer) { clearInterval(HR.refreshTimer); HR.refreshTimer = null; }
     const holder = $('#ftDetail');
     if (!holder) return;
-    holder.innerHTML = '<div class="card empty">Memuat peta...</div>';
+    if (!fromAutoRefresh) holder.innerHTML = '<div class="card empty">Memuat peta...</div>';
     try {
       const [{ data, error }] = await Promise.all([sb.rpc('hr_field_trip_detail', { p_trip_id: id }), loadLeaflet()]);
       if (error) throw error;
@@ -8942,47 +9068,148 @@ console.log(
       const points = data.points || [];
       const visits = data.visits || [];
       const km = routeKm(points);
-
-      holder.innerHTML = `<div class="section">
-        <div class="section-head"><h2>${esc(trip.employee_name || '-')} — ${esc(trip.purpose || '-')}</h2></div>
-        <div class="muted">Mulai ${esc(fmtDateTime(trip.started_at, TZ))} · ${trip.ended_at ? 'Selesai ' + esc(fmtDateTime(trip.ended_at, TZ)) : 'Masih aktif'} · ${points.length} titik · ±${km.toFixed(1)} km (perkiraan)</div>
-        <div id="ftMap" style="height:420px;border-radius:12px;margin:12px 0"></div>
-        <div class="table-wrap"><table class="table">
-          <thead><tr><th>#</th><th>Waktu</th><th>Tempat</th><th>Catatan</th><th>Akurasi</th></tr></thead>
-          <tbody>${visits.length ? visits.map((v, i) => `<tr>
-            <td>${i + 1}</td><td>${esc(fmtTime(v.at, TZ))}</td><td>${esc(v.place || '-')}</td>
-            <td>${esc(v.notes || '-')}</td><td>${v.acc != null ? '±' + Math.round(Number(v.acc)) + ' m' : '-'}</td>
-          </tr>`).join('') : '<tr><td colspan="5" class="muted">Belum ada check-in kunjungan.</td></tr>'}</tbody>
-        </table></div></div>`;
-
-      if (HR.map) { HR.map.remove(); HR.map = null; }
-      const map = L.map('ftMap');
-      HR.map = map;
-      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap' }).addTo(map);
-
-      const all = [];
-      const line = points.map(p => [Number(p.lat), Number(p.lng)]);
-      if (line.length) {
-        L.polyline(line, { weight: 4, opacity: 0.8 }).addTo(map);
-        L.circleMarker(line[0], { radius: 8, color: '#15803d', fillColor: '#22c55e', fillOpacity: 1 }).addTo(map).bindTooltip('Mulai');
-        const last = line[line.length - 1];
-        L.circleMarker(last, { radius: 8, color: '#b91c1c', fillColor: '#ef4444', fillOpacity: 1 }).addTo(map)
-          .bindTooltip(trip.status === 'active' ? 'Lokasi terakhir' : 'Selesai');
-        all.push(...line);
+      if (trip.status !== 'active' && HR.refreshTimer) {
+        clearInterval(HR.refreshTimer);
+        HR.refreshTimer = null;
       }
-      visits.forEach((v, i) => {
-        const ll = [Number(v.lat), Number(v.lng)];
-        all.push(ll);
-        const icon = L.divIcon({
-          className: '',
-          html: `<div style="background:#2563eb;color:#fff;border-radius:50%;width:26px;height:26px;line-height:26px;text-align:center;font-weight:700;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)">${i + 1}</div>`,
-          iconSize: [26, 26], iconAnchor: [13, 13]
-        });
-        L.marker(ll, { icon }).addTo(map).bindTooltip(`${i + 1}. ${esc(v.place || '-')}`);
+
+      // Sort GPS points by their captured timestamp so "latest" is truly the newest point,
+      // regardless of the order returned by the RPC.
+      const orderedPoints = points.slice().sort((a, b) => {
+        const ta = Date.parse(a.at || a.captured_at || a.created_at || '') || 0;
+        const tb = Date.parse(b.at || b.captured_at || b.created_at || '') || 0;
+        return ta - tb;
       });
-      if (all.length) map.fitBounds(L.latLngBounds(all), { padding: [30, 30], maxZoom: 17 });
-      else map.setView([-6.2, 106.8], 11);
-      holder.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      const latest = orderedPoints.length ? orderedPoints[orderedPoints.length - 1] : null;
+      const latestLat = latest ? Number(latest.lat) : NaN;
+      const latestLng = latest ? Number(latest.lng) : NaN;
+      const hasLatest = Number.isFinite(latestLat) && Number.isFinite(latestLng)
+        && latestLat >= -90 && latestLat <= 90 && latestLng >= -180 && latestLng <= 180;
+      const latestAt = latest && (latest.at || latest.captured_at || latest.created_at);
+      const summaryText = 'Mulai ' + fmtDateTime(trip.started_at, TZ) + ' · '
+        + (trip.ended_at ? 'Selesai ' + fmtDateTime(trip.ended_at, TZ) : 'Masih aktif')
+        + ' · ' + points.length + ' titik · ±' + km.toFixed(1) + ' km (perkiraan)';
+      const liveText = trip.status === 'active'
+        ? 'Pembaruan otomatis setiap 15 detik · Lokasi terakhir: ' + (latestAt ? fmtDateTime(latestAt, TZ) : 'belum tersedia')
+        : 'Tugas sudah tidak aktif; lokasi tidak diperbarui lagi.';
+
+      // Refresh otomatis memperbarui layer yang berubah tanpa menghancurkan peta,
+      // sehingga zoom, posisi layar, dan interaksi HR tetap terjaga.
+      const canUpdateExistingMap = fromAutoRefresh && HR.map && HR.mapTripId === id
+        && document.getElementById('ftMap') && HR.routeLine && HR.visitLayer;
+      if (canUpdateExistingMap) {
+        const line = orderedPoints.map(p => [Number(p.lat), Number(p.lng)])
+          .filter(ll => Number.isFinite(ll[0]) && Number.isFinite(ll[1]) && Math.abs(ll[0]) <= 90 && Math.abs(ll[1]) <= 180);
+        HR.routeLine.setLatLngs(line);
+        HR.visitLayer.clearLayers();
+        visits.forEach((v, i) => {
+          const ll = [Number(v.lat), Number(v.lng)];
+          if (!Number.isFinite(ll[0]) || !Number.isFinite(ll[1]) || Math.abs(ll[0]) > 90 || Math.abs(ll[1]) > 180) return;
+          const icon = L.divIcon({
+            className: '',
+            html: '<div style="background:#2563eb;color:#fff;border-radius:50%;width:26px;height:26px;line-height:26px;text-align:center;font-weight:700;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)">' + (i + 1) + '</div>',
+            iconSize: [26, 26], iconAnchor: [13, 13]
+          });
+          L.marker(ll, { icon }).addTo(HR.visitLayer).bindTooltip((i + 1) + '. ' + esc(v.place || '-'));
+        });
+        if (line.length) {
+          HR.startMarker.setLatLng(line[0]);
+          HR.startMarker.setTooltipContent('Mulai');
+        }
+        if (hasLatest) {
+          if (HR.latestMarker) HR.latestMarker.setLatLng([latestLat, latestLng]);
+          else HR.latestMarker = L.circleMarker([latestLat, latestLng], {
+            radius: 12, color: '#1d4ed8', weight: 4, fillColor: '#60a5fa', fillOpacity: 0.65
+          }).addTo(HR.map).bindTooltip('LIVE · Lokasi terakhir', { permanent: true, direction: 'top' });
+          HR.latestMarker.setTooltipContent(trip.status === 'active' ? 'LIVE · Lokasi terakhir' : 'Selesai');
+          // Ikuti lokasi baru hanya jika marker bergerak cukup jauh; jangan reset zoom.
+          const center = HR.map.getCenter();
+          if (center.distanceTo(L.latLng(latestLat, latestLng)) > 180) HR.map.panTo([latestLat, latestLng], { animate: true, duration: 0.6 });
+        }
+        const summary = holder.querySelector('[data-ft-summary]');
+        if (summary) summary.textContent = summaryText;
+        const liveInfo = holder.querySelector('[data-ft-live-info]');
+        if (liveInfo) liveInfo.textContent = liveText;
+        const pointsBody = holder.querySelector('[data-ft-points-body]');
+        if (pointsBody) pointsBody.innerHTML = points.length ? points.slice().reverse().map((p, i) => {
+          const lat = Number(p.lat), lng = Number(p.lng), acc = p.acc;
+          const valid = Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180;
+          const mapsUrl = valid ? 'https://www.google.com/maps?q=' + encodeURIComponent(lat + ',' + lng) : '';
+          return '<tr><td>' + (points.length - i) + '</td><td>' + esc(fmtDateTime(p.at || p.captured_at || p.created_at, TZ)) + '</td><td>' +
+            (valid ? lat.toFixed(6) : '-') + '</td><td>' + (valid ? lng.toFixed(6) : '-') +
+            '</td><td>' + (acc != null ? '±' + Math.round(Number(acc)) + ' m' : '-') + '</td><td>' +
+            (valid ? '<a href="' + mapsUrl + '" target="_blank" rel="noopener noreferrer">Buka Google Maps ↗</a>' : '-') + '</td></tr>';
+        }).join('') : '<tr><td colspan="6" class="muted">Belum ada titik GPS.</td></tr>';
+      } else {
+        holder.innerHTML = `<div class="section">
+          <div class="section-head"><h2>${esc(trip.employee_name || '-')} — ${esc(trip.purpose || '-')}</h2></div>
+          <div class="muted" data-ft-summary>${esc(summaryText)}</div>
+          <div id="ftMap" style="height:420px;border-radius:12px;margin:12px 0"></div>
+          <div class="muted" data-ft-live-info style="margin:6px 0">${esc(liveText)}</div>
+          <div class="table-wrap"><table class="table">
+            <thead><tr><th>#</th><th>Waktu</th><th>Tempat</th><th>Catatan</th><th>Akurasi</th></tr></thead>
+            <tbody>${visits.length ? visits.map((v, i) => `<tr>
+              <td>${i + 1}</td><td>${esc(fmtTime(v.at, TZ))}</td><td>${esc(v.place || '-')}</td>
+              <td>${esc(v.notes || '-')}</td><td>${v.acc != null ? '±' + Math.round(Number(v.acc)) + ' m' : '-'}</td>
+            </tr>`).join('') : '<tr><td colspan="5" class="muted">Belum ada check-in kunjungan.</td></tr>'}</tbody>
+          </table></div>
+          <div class="section-head" style="margin-top:16px"><h3>Riwayat Titik GPS</h3></div>
+          <div class="table-wrap"><table class="table">
+            <thead><tr><th>#</th><th>Waktu</th><th>Latitude</th><th>Longitude</th><th>Akurasi</th><th>Peta</th></tr></thead>
+            <tbody data-ft-points-body>${points.length ? points.slice().reverse().map((p, i) => {
+              const lat = Number(p.lat), lng = Number(p.lng), acc = p.acc;
+              const valid = Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180;
+              const mapsUrl = valid ? 'https://www.google.com/maps?q=' + encodeURIComponent(lat + ',' + lng) : '';
+              return '<tr><td>' + (points.length - i) + '</td><td>' + esc(fmtDateTime(p.at || p.captured_at || p.created_at, TZ)) + '</td><td>' +
+                (valid ? lat.toFixed(6) : '-') + '</td><td>' + (valid ? lng.toFixed(6) : '-') +
+                '</td><td>' + (acc != null ? '±' + Math.round(Number(acc)) + ' m' : '-') + '</td><td>' +
+                (valid ? '<a href="' + mapsUrl + '" target="_blank" rel="noopener noreferrer">Buka Google Maps ↗</a>' : '-') + '</td></tr>';
+            }).join('') : '<tr><td colspan="6" class="muted">Belum ada titik GPS.</td></tr>'}</tbody>
+          </table></div></div>`;
+
+        if (HR.map) { HR.map.remove(); HR.map = null; }
+        const map = L.map('ftMap');
+        HR.map = map;
+        HR.mapTripId = id;
+        L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap' }).addTo(map);
+        const line = points.map(p => [Number(p.lat), Number(p.lng)])
+          .filter(ll => Number.isFinite(ll[0]) && Number.isFinite(ll[1]) && Math.abs(ll[0]) <= 90 && Math.abs(ll[1]) <= 180);
+        HR.routeLine = L.polyline(line, { weight: 4, opacity: 0.8 }).addTo(map);
+        HR.visitLayer = L.layerGroup().addTo(map);
+        HR.startMarker = null;
+        HR.latestMarker = null;
+        const all = [...line];
+        if (line.length) {
+          HR.startMarker = L.circleMarker(line[0], { radius: 8, color: '#15803d', fillColor: '#22c55e', fillOpacity: 1 })
+            .addTo(map).bindTooltip('Mulai');
+        }
+        visits.forEach((v, i) => {
+          const ll = [Number(v.lat), Number(v.lng)];
+          if (!Number.isFinite(ll[0]) || !Number.isFinite(ll[1]) || Math.abs(ll[0]) > 90 || Math.abs(ll[1]) > 180) return;
+          all.push(ll);
+          const icon = L.divIcon({
+            className: '',
+            html: '<div style="background:#2563eb;color:#fff;border-radius:50%;width:26px;height:26px;line-height:26px;text-align:center;font-weight:700;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)">' + (i + 1) + '</div>',
+            iconSize: [26, 26], iconAnchor: [13, 13]
+          });
+          L.marker(ll, { icon }).addTo(HR.visitLayer).bindTooltip((i + 1) + '. ' + esc(v.place || '-'));
+        });
+        if (hasLatest) {
+          HR.latestMarker = L.circleMarker([latestLat, latestLng], {
+            radius: 12, color: '#1d4ed8', weight: 4, fillColor: '#60a5fa', fillOpacity: 0.65
+          }).addTo(map).bindTooltip(trip.status === 'active' ? 'LIVE · Lokasi terakhir' : 'Selesai', { permanent: true, direction: 'top' });
+        }
+        if (all.length) map.fitBounds(L.latLngBounds(all), { padding: [30, 30], maxZoom: 17 });
+        else map.setView([-6.2, 106.8], 11);
+        if (!fromAutoRefresh) holder.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+
+      if (trip.status === 'active' && !HR.refreshTimer) {
+        HR.refreshTimer = setInterval(() => {
+          if (state.view === 'field_trips' && HR.selectedTripId === id && document.getElementById('ftDetail')) showTrip(id, true);
+          else { clearInterval(HR.refreshTimer); HR.refreshTimer = null; }
+        }, 15000);
+      }
     } catch (err) {
       holder.innerHTML = `<div class="card"><div class="error">${esc(friendlyError(err))}</div></div>`;
     }

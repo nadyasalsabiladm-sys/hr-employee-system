@@ -1,0 +1,8 @@
+{
+  "appId": "com.zayco.hremployeesystem",
+  "appName": "HR Employee System",
+  "webDir": "www",
+  "android": {
+    "useLegacyBridge": true
+  }
+}

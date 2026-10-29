@@ -1,0 +1,25 @@
+{
+  "name": "hr-employee-system",
+  "version": "1.0.0",
+  "private": true,
+  "description": "HR Employee System mobile wrapper for Android and iOS",
+  "scripts": {
+    "web:prepare": "node scripts/copy-web-assets.mjs",
+    "cap:sync": "npm run web:prepare && cap sync",
+    "cap:add:android": "npm run web:prepare && cap add android",
+    "cap:add:ios": "npm run web:prepare && cap add ios"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.0.0",
+    "@capacitor/core": "^8.0.0",
+    "@capacitor/ios": "^8.0.0",
+    "@capgo/background-geolocation": "8.4.11"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.0.0",
+    "esbuild": "^0.25.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
