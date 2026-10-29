@@ -9073,7 +9073,14 @@ console.log(
         HR.refreshTimer = null;
       }
 
-      const latest = points.length ? points[points.length - 1] : null;
+      // Sort GPS points by their captured timestamp so "latest" is truly the newest point,
+      // regardless of the order returned by the RPC.
+      const orderedPoints = points.slice().sort((a, b) => {
+        const ta = Date.parse(a.at || a.captured_at || a.created_at || '') || 0;
+        const tb = Date.parse(b.at || b.captured_at || b.created_at || '') || 0;
+        return ta - tb;
+      });
+      const latest = orderedPoints.length ? orderedPoints[orderedPoints.length - 1] : null;
       const latestLat = latest ? Number(latest.lat) : NaN;
       const latestLng = latest ? Number(latest.lng) : NaN;
       const hasLatest = Number.isFinite(latestLat) && Number.isFinite(latestLng)
@@ -9091,7 +9098,7 @@ console.log(
       const canUpdateExistingMap = fromAutoRefresh && HR.map && HR.mapTripId === id
         && document.getElementById('ftMap') && HR.routeLine && HR.visitLayer;
       if (canUpdateExistingMap) {
-        const line = points.map(p => [Number(p.lat), Number(p.lng)])
+        const line = orderedPoints.map(p => [Number(p.lat), Number(p.lng)])
           .filter(ll => Number.isFinite(ll[0]) && Number.isFinite(ll[1]) && Math.abs(ll[0]) <= 90 && Math.abs(ll[1]) <= 180);
         HR.routeLine.setLatLngs(line);
         HR.visitLayer.clearLayers();
