@@ -8575,8 +8575,7 @@ console.log(
 
 (function () {
   const TZ = 'Asia/Jakarta';
-  const TRACK_INTERVAL_MS = 30000; // interval browser ketika halaman aktif
-  const FT = { timer: null, native: false, nativeStarting: false, generation: 0, busy: false, queuedPoint: null, wakeLock: null, lastSent: null, lastError: null, keepAwake: true };
+  const FT = { timer: null, watchId: null, native: false, nativeStarting: false, generation: 0, busy: false, queuedPoint: null, wakeLock: null, lastSent: null, lastError: null, keepAwake: true };
 
   /* ---------- Util ---------- */
   const errText = err =>
@@ -8621,7 +8620,7 @@ console.log(
     const el = document.getElementById('ftStatusLine');
     if (!el) return;
     const sent = FT.lastSent ? fmtDateTime(FT.lastSent.toISOString(), TZ) : 'belum ada';
-    el.innerHTML = `Pelacakan: <b>${(FT.timer || FT.native || FT.nativeStarting) ? 'aktif' : 'tidak aktif'}</b> · Lokasi terakhir terkirim: ${esc(sent)}` +
+    el.innerHTML = `Pelacakan: <b>${(FT.timer || FT.watchId !== null || FT.native || FT.nativeStarting) ? 'aktif' : 'tidak aktif'}</b> · Lokasi terakhir terkirim: ${esc(sent)}` +
       (FT.lastError ? `<div class="error">${esc(FT.lastError)}</div>` : '');
   }
 
@@ -8682,6 +8681,8 @@ console.log(
   function stopTracking() {
     if (FT.timer) clearInterval(FT.timer);
     FT.timer = null;
+    if (FT.watchId !== null && navigator.geolocation) navigator.geolocation.clearWatch(FT.watchId);
+    FT.watchId = null;
     FT.generation += 1;
     FT.nativeStarting = false;
     const wasNative = FT.native;
@@ -8698,7 +8699,7 @@ console.log(
   }
 
   async function startTracking() {
-    if (FT.timer || FT.native || FT.nativeStarting) return;
+    if (FT.timer || FT.watchId !== null || FT.native || FT.nativeStarting) return;
     const bridge = window.HRISBackgroundLocation;
     if (bridge && bridge.isNative()) {
       FT.nativeStarting = true;
@@ -8736,18 +8737,41 @@ console.log(
       }
       return;
     }
-    FT.timer = setInterval(sendPoint, TRACK_INTERVAL_MS);
+    if (!navigator.geolocation) {
+      FT.lastError = 'Browser tidak mendukung lokasi (GPS).';
+      updateStatusLine();
+      return;
+    }
+    // Browser: kirim titik setiap kali GPS melaporkan perubahan posisi.
+    // watchPosition lebih sesuai untuk perjalanan daripada polling getCurrentPosition.
+    FT.watchId = navigator.geolocation.watchPosition(
+      p => {
+        if (!empPortal.token || FT.watchId === null) return;
+        FT.lastError = null;
+        sendCoordinates(p.coords.latitude, p.coords.longitude, p.coords.accuracy);
+      },
+      err => {
+        FT.lastError = geoMsg(err);
+        updateStatusLine();
+      },
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 25000 }
+    );
     acquireWakeLock();
     updateStatusLine();
+    // Ambil titik awal segera, tidak perlu menunggu callback pertama watchPosition.
+    sendPoint();
   }
 
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && FT.timer) { acquireWakeLock(); sendPoint(); }
+    if (document.visibilityState === 'visible' && (FT.timer || FT.watchId !== null)) {
+      acquireWakeLock();
+      sendPoint();
+    }
   });
 
   async function resumeIfActive() {
     try {
-      if (FT.timer || FT.native || FT.nativeStarting || !empPortal.token) return;
+      if (FT.timer || FT.watchId !== null || FT.native || FT.nativeStarting || !empPortal.token) return;
       const st = await empRpc('employee_field_status');
       if (st && st.consented && st.active_trip) { startTracking(); sendPoint(); }
     } catch (_) { }
