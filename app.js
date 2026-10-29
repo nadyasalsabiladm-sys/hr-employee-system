@@ -9078,7 +9078,7 @@ console.log(
       const latestLng = latest ? Number(latest.lng) : NaN;
       const hasLatest = Number.isFinite(latestLat) && Number.isFinite(latestLng)
         && latestLat >= -90 && latestLat <= 90 && latestLng >= -180 && latestLng <= 180;
-      const latestAt = latest && (latest.captured_at || latest.created_at);
+      const latestAt = latest && (latest.at || latest.captured_at || latest.created_at);
       const summaryText = 'Mulai ' + fmtDateTime(trip.started_at, TZ) + ' · '
         + (trip.ended_at ? 'Selesai ' + fmtDateTime(trip.ended_at, TZ) : 'Masih aktif')
         + ' · ' + points.length + ' titik · ±' + km.toFixed(1) + ' km (perkiraan)';
@@ -9123,6 +9123,13 @@ console.log(
         if (summary) summary.textContent = summaryText;
         const liveInfo = holder.querySelector('[data-ft-live-info]');
         if (liveInfo) liveInfo.textContent = liveText;
+        const pointsBody = holder.querySelector('[data-ft-points-body]');
+        if (pointsBody) pointsBody.innerHTML = points.length ? points.slice().reverse().map((p, i) => {
+          const lat = Number(p.lat), lng = Number(p.lng), acc = p.acc;
+          return '<tr><td>' + (points.length - i) + '</td><td>' + esc(fmtDateTime(p.at || p.captured_at || p.created_at, TZ)) + '</td><td>' +
+            (Number.isFinite(lat) ? lat.toFixed(6) : '-') + '</td><td>' + (Number.isFinite(lng) ? lng.toFixed(6) : '-') +
+            '</td><td>' + (acc != null ? '±' + Math.round(Number(acc)) + ' m' : '-') + '</td></tr>';
+        }).join('') : '<tr><td colspan="5" class="muted">Belum ada titik GPS.</td></tr>';
       } else {
         holder.innerHTML = `<div class="section">
           <div class="section-head"><h2>${esc(trip.employee_name || '-')} — ${esc(trip.purpose || '-')}</h2></div>
@@ -9135,6 +9142,16 @@ console.log(
               <td>${i + 1}</td><td>${esc(fmtTime(v.at, TZ))}</td><td>${esc(v.place || '-')}</td>
               <td>${esc(v.notes || '-')}</td><td>${v.acc != null ? '±' + Math.round(Number(v.acc)) + ' m' : '-'}</td>
             </tr>`).join('') : '<tr><td colspan="5" class="muted">Belum ada check-in kunjungan.</td></tr>'}</tbody>
+          </table></div>
+          <div class="section-head" style="margin-top:16px"><h3>Riwayat Titik GPS</h3></div>
+          <div class="table-wrap"><table class="table">
+            <thead><tr><th>#</th><th>Waktu</th><th>Latitude</th><th>Longitude</th><th>Akurasi</th></tr></thead>
+            <tbody data-ft-points-body>${points.length ? points.slice().reverse().map((p, i) => {
+              const lat = Number(p.lat), lng = Number(p.lng), acc = p.acc;
+              return '<tr><td>' + (points.length - i) + '</td><td>' + esc(fmtDateTime(p.at || p.captured_at || p.created_at, TZ)) + '</td><td>' +
+                (Number.isFinite(lat) ? lat.toFixed(6) : '-') + '</td><td>' + (Number.isFinite(lng) ? lng.toFixed(6) : '-') +
+                '</td><td>' + (acc != null ? '±' + Math.round(Number(acc)) + ' m' : '-') + '</td></tr>';
+            }).join('') : '<tr><td colspan="5" class="muted">Belum ada titik GPS.</td></tr>'}</tbody>
           </table></div></div>`;
 
         if (HR.map) { HR.map.remove(); HR.map = null; }
